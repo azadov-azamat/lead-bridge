@@ -64,6 +64,15 @@ module.exports = (sequelize) => {
         type: DataTypes.TEXT,
         allowNull: true,
       },
+      isDeleted: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      deletedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {
       tableName: 'sheets',
@@ -71,6 +80,7 @@ module.exports = (sequelize) => {
         { fields: ['user_telegram_id'] },
         { fields: ['status'] },
         { fields: ['group_id'] },
+        { fields: ['is_deleted'] },
       ],
     }
   );

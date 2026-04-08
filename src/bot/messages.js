@@ -140,7 +140,13 @@ const COPY = {
     sheetsTitle: (count) => `Sizning sheetlaringiz: <b>${count}</b> ta\n`,
     verifyHint: (sheetId) => `/verify_${sheetId} — ulanishni tekshirish`,
     sheetError: (errorReason) => `Xato: <code>${escape(errorReason)}</code>`,
-    sheetNotFound: `Bu sheet topilmadi yoki sizga tegishli emas.`,
+    sheetNotFound: `❓ Bu sheet topilmadi yoki sizga tegishli emas.`,
+    confirmDeleteSheet: (sheetTitle) =>
+      `🗑 <b>${escape(sheetTitle || '')}</b> sheet'ini o'chirmoqchimisiz?\n\n` +
+      `⚠️ O'chirilgan sheet endi ko'rsatilmaydi va leadlar olinmaydi.\n\n` +
+      `Tasdiqlash uchun pastdagi tugmani bosing.`,
+    sheetDeleted: (sheetTitle) =>
+      `🗑 Sheet <b>${escape(sheetTitle || '')}</b> o'chirildi.`,
     statusTitle: `Sizning holatingiz\n`,
     statusName: (value) => `👤 <b>Ism:</b> ${value || '—'}`,
     statusPhone: (value) => `📱 <b>Telefon:</b> ${value || '—'}`,

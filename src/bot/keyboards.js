@@ -22,10 +22,11 @@ const LABELS = {
     language: '🌐 Til',
     back: '🔙 Orqaga',
     cancel: '❌ Bekor qilish',
-    newGmail: '✍️ Yangi gmail',
     newGroup: '➕ Yangi guruh',
     verified: '✅ Ulandim',
     sendPhone: '📱 Raqamni yuborish',
+    confirmYes: '✅ Ha, o\'chirish',
+    confirmNo: '🔙 Yo\'q, qaytish',
     uz: "🇺🇿 O'zbekcha",
     ru: '🇷🇺 Русский',
   },
@@ -39,9 +40,10 @@ const LABELS = {
     language: '🌐 Язык',
     back: '🔙 Назад',
     cancel: '❌ Отмена',
-    newGmail: '✍️ Новый Gmail',
     newGroup: '➕ Новая группа',
     verified: '✅ Подключил',
+    confirmYes: '✅ Да, удалить',
+    confirmNo: '🔙 Нет, назад',
     sendPhone: '📱 Отправить номер',
     uz: "🇺🇿 O'zbekcha",
     ru: '🇷🇺 Русский',
@@ -105,13 +107,13 @@ function requestPhone(language) {
 }
 
 /**
- * Gmail picker — eski gmaillar + "Yangi gmail" + Bekor qilish.
+ * Gmail picker — eski gmaillar + Bekor qilish.
+ * Yangi gmail uchun alohida tugma yo'q: user inputga to'g'ridan-to'g'ri yozadi.
  * Tanlangan tugma matni: "📧 user@gmail.com"
  */
 function gmailPicker(language, gmails) {
   const l = L(language);
   const rows = gmails.map((email) => [`📧 ${truncate(email, 40)}`]);
-  rows.push([l.newGmail]);
   rows.push([l.cancel]);
   return Markup.keyboard(rows).resize();
 }
@@ -124,6 +126,34 @@ function verifySheetMenu(language) {
   return Markup.keyboard([
     [l.verified],
     [l.cancel],
+  ]).resize();
+}
+
+/**
+ * Sheets ro'yxati ekranida ko'rsatiladigan keyboard — har sheet uchun
+ * "🗑 #N" o'chirish tugmasi va orqaga qaytish.
+ */
+function sheetsListMenu(language, sheets) {
+  const l = L(language);
+  const rows = [];
+  // Tugmalarni 2 tadan ustunda joylashtiramiz
+  for (let i = 0; i < sheets.length; i += 2) {
+    const row = [`🗑 #${i + 1}`];
+    if (sheets[i + 1]) row.push(`🗑 #${i + 2}`);
+    rows.push(row);
+  }
+  rows.push([l.back]);
+  return Markup.keyboard(rows).resize();
+}
+
+/**
+ * Sheet o'chirishni tasdiqlash keyboardi.
+ */
+function confirmDeleteMenu(language) {
+  const l = L(language);
+  return Markup.keyboard([
+    [l.confirmYes],
+    [l.confirmNo],
   ]).resize();
 }
 
@@ -189,6 +219,8 @@ module.exports = {
   requestPhone,
   gmailPicker,
   verifySheetMenu,
+  sheetsListMenu,
+  confirmDeleteMenu,
   groupPicker,
   removeKeyboard,
   matchLabel,

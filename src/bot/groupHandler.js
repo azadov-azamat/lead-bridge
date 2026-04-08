@@ -203,7 +203,7 @@ function register(bot) {
         );
       } catch (_) {}
       try {
-        await state.setState(fromUserId, 'main');
+        await state.resetToMain(fromUserId);
         await ctx.telegram.sendMessage(
           fromUserId,
           copy.mainMenuHint,

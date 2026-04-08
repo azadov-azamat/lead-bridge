@@ -123,7 +123,8 @@ async function createSheet({ userTelegramId, spreadsheetId, spreadsheetUrl, titl
 
 async function getSheet(sheetPk) {
   const sheet = await Sheet.findByPk(sheetPk);
-  return sheet ? sheet.toJSON() : null;
+  if (!sheet || sheet.isDeleted) return null;
+  return sheet.toJSON();
 }
 
 async function updateSheet(sheetPk, fields) {
@@ -135,9 +136,21 @@ async function deleteSheet(sheetPk) {
   await Sheet.destroy({ where: { id: sheetPk } });
 }
 
+/**
+ * Soft-delete: sheet jadvaldan o'chirilmaydi, faqat is_deleted=true va
+ * deleted_at=NOW belgilanadi. Barcha listing va poller so'rovlari deleted'larni
+ * filter qiladi.
+ */
+async function softDeleteSheet(sheetPk) {
+  await Sheet.update(
+    { isDeleted: true, deletedAt: new Date() },
+    { where: { id: sheetPk } }
+  );
+}
+
 async function listUserSheets(userTelegramId) {
   const sheets = await Sheet.findAll({
-    where: { userTelegramId },
+    where: { userTelegramId, isDeleted: false },
     order: [['createdAt', 'DESC']],
   });
   return sheets.map((s) => s.toJSON());
@@ -145,13 +158,14 @@ async function listUserSheets(userTelegramId) {
 
 async function countVerifiedSheets(userTelegramId) {
   return Sheet.count({
-    where: { userTelegramId, status: 'verified' },
+    where: { userTelegramId, status: 'verified', isDeleted: false },
   });
 }
 
 /**
  * Userning oldin ishlatgan gmail akkountlari (distinct, eng so'nggi avval).
- * Picker uchun.
+ * Picker uchun. O'chirilgan sheetlarning gmail'lari ham qaytariladi (chunki
+ * user yana shu manzilni ishlatishi mumkin).
  */
 async function listUserGmails(userTelegramId) {
   const rows = await Sheet.findAll({
@@ -179,6 +193,7 @@ async function getSheetsForPolling() {
     where: {
       status: 'verified',
       groupId: { [Op.ne]: null },
+      isDeleted: false,
     },
     include: [
       {
@@ -206,6 +221,7 @@ async function getSheetsAwaitingAdmin() {
     where: {
       status: 'verified',
       groupId: { [Op.ne]: null },
+      isDeleted: false,
     },
     include: [
       {
@@ -287,6 +303,7 @@ async function isUserActive(telegramId) {
       userTelegramId: telegramId,
       status: 'verified',
       groupId: { [Op.ne]: null },
+      isDeleted: false,
     },
   });
   return count > 0;
@@ -318,6 +335,7 @@ module.exports = {
   getSheet,
   updateSheet,
   deleteSheet,
+  softDeleteSheet,
   listUserSheets,
   listUserGmails,
   countVerifiedSheets,
