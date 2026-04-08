@@ -205,16 +205,15 @@ async function routeText(ctx, user, text) {
 
   // -------- Page-specific --------
 
-  // start page
-  if (session.page === 'start' || user.status === 'new') {
-    if (labelKey === 'start') {
-      await beginOnboarding(ctx, user);
-      return;
-    }
+  // start page — yangi user 🚀 Boshlash bossa
+  if (session.page === 'start' && labelKey === 'start') {
+    await beginOnboarding(ctx, user);
+    return;
   }
 
-  // awaiting_phone — text bo'lsa qayta so'raymiz
-  if (session.page === 'awaiting_phone' || user.status === 'awaiting_phone') {
+  // awaiting_phone — telefon kontakt orqali yuborilishi kutilmoqda.
+  // Faqat session shu page'da bo'lsa va telefon hali yo'q bo'lsa.
+  if (session.page === 'awaiting_phone' && !user.phone) {
     await ctx.replyWithHTML(copy.askPhone, keyboards.requestPhone(user.language));
     return;
   }

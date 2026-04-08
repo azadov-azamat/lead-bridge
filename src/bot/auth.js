@@ -72,12 +72,13 @@ async function auth(ctx, next) {
 
   const isFirstTime = !!upserted.__created;
 
-  // Status normallashtirish:
-  //   - phone bor + status hali 'new'/'awaiting_gmail'/eski qoldiqlar bo'lsa,
-  //     'ready' ga o'tkazamiz. Bu eng asosiy bug fix: foydalanuvchi /start
-  //     bosgani bilan qaytadan ro'yxatdan o'tkazilmasin.
-  //   - phone yo'q va status 'ready' bo'lsa (yaroqsiz holat) — 'new' ga.
-  if (user.phone && user.status !== 'ready' && user.status !== 'awaiting_phone') {
+  // Status normallashtirish — `user.status` har doim `user.phone` bilan
+  // muvofiq bo'lishi kerak:
+  //   - phone bor → status 'ready' (eski awaiting_gmail/awaiting_phone/new
+  //     qoldiqlari bo'lishidan qat'i nazar). Aks holda routeText awaiting_phone
+  //     branch'da qolib, foydalanuvchiga noto'g'ri tugmalar chiqaradi.
+  //   - phone yo'q + status 'ready' (yaroqsiz) → 'new'.
+  if (user.phone && user.status !== 'ready') {
     await db.updateUser(id, { status: 'ready' });
     user = await db.getUser(id);
   } else if (!user.phone && user.status === 'ready') {
