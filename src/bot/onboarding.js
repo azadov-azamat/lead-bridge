@@ -50,12 +50,21 @@ function register(bot) {
   // /commands
   // ============================================================
   bot.start(async (ctx) => {
-    const { user, isFirstTime } = await ensureUser(ctx);
-    const copy = getCopy(user, ctx);
+    const user = ctx.user;
+    const copy = ctx.copy;
+    const isFirstTime = ctx.isFirstTime;
+    if (!user) return;
+
     await state.resetToMain(user.telegramId);
 
+    // 1) Telefoni bor — registratsiya tugagan, darhol main menyu
+    if (user.phone) {
+      await renderMain(ctx, user);
+      return;
+    }
+
+    // 2) Birinchi marta — to'liq welcome + 🚀 Boshlash
     if (isFirstTime) {
-      // Birinchi marta — faqat welcome (start tugmasi bilan)
       await state.setPage(user.telegramId, 'start');
       await ctx.replyWithHTML(
         copy.welcome(ctx.from.first_name),
@@ -64,52 +73,41 @@ function register(bot) {
       return;
     }
 
-    if (user.status === 'ready') {
-      await renderMain(ctx, user);
-    } else if (user.status === 'awaiting_phone') {
-      await state.setPage(user.telegramId, 'awaiting_phone');
-      await ctx.replyWithHTML(copy.askPhone, keyboards.requestPhone(user.language));
-    } else {
-      await state.setPage(user.telegramId, 'start');
-      await ctx.reply(copy.mainMenuHint, keyboards.startMenu(user.language));
-    }
+    // 3) Oldin kelgan, lekin telefon bermay ketgan — qisqa prompt
+    await db.updateUser(user.telegramId, { status: 'awaiting_phone' });
+    await state.setPage(user.telegramId, 'awaiting_phone');
+    await ctx.replyWithHTML(copy.askPhone, keyboards.requestPhone(user.language));
   });
 
   bot.command('status', async (ctx) => {
-    const user = await db.getUser(ctx.from.id);
-    if (!user) {
-      await ctx.reply(messages.forLanguage(ctx.from.language_code).notStarted);
+    if (!ctx.user) {
+      await ctx.reply(ctx.copy?.notStarted || 'Avval /start ni bosing.');
       return;
     }
-    await sendStatus(ctx, user);
+    await sendStatus(ctx, ctx.user);
   });
 
   bot.command('help', async (ctx) => {
-    const user = await db.getUser(ctx.from.id);
-    await ctx.replyWithHTML(getCopy(user, ctx).help, {
-      disable_web_page_preview: true,
-    });
+    await ctx.replyWithHTML(ctx.copy.help, { disable_web_page_preview: true });
   });
 
   bot.command('language', async (ctx) => {
-    const { user } = await ensureUser(ctx);
-    await pushLanguage(ctx, user);
+    if (!ctx.user) return;
+    await pushLanguage(ctx, ctx.user);
   });
 
   bot.command('sheets', async (ctx) => {
-    const user = await db.getUser(ctx.from.id);
-    if (!user) {
-      await ctx.reply(messages.forLanguage(ctx.from.language_code).notStarted);
+    if (!ctx.user) {
+      await ctx.reply(ctx.copy?.notStarted || 'Avval /start ni bosing.');
       return;
     }
-    await pushSheetsList(ctx, user);
+    await pushSheetsList(ctx, ctx.user);
   });
 
   bot.command('newsheet', async (ctx) => {
-    const user = await db.getUser(ctx.from.id);
-    const copy = getCopy(user, ctx);
-    if (!user || user.status !== 'ready') {
-      await ctx.replyWithHTML(copy.newSheetNotReady);
+    const user = ctx.user;
+    if (!user || !user.phone) {
+      await ctx.replyWithHTML(ctx.copy.newSheetNotReady);
       return;
     }
     await startNewSheetFlow(ctx, user);
@@ -120,25 +118,26 @@ function register(bot) {
   });
 
   bot.command('changegroup', async (ctx) => {
-    const user = await db.getUser(ctx.from.id);
-    const copy = getCopy(user, ctx);
-    if (!user) {
-      await ctx.reply(copy.notStarted);
+    if (!ctx.user) {
+      await ctx.reply(ctx.copy?.notStarted || 'Avval /start ni bosing.');
       return;
     }
-    await ctx.replyWithHTML(copy.changeGroupNoCurrent);
+    await ctx.replyWithHTML(ctx.copy.changeGroupNoCurrent);
   });
 
   // ============================================================
   // contact (telefon raqam)
   // ============================================================
   bot.on('contact', async (ctx) => {
-    const user = await db.getUser(ctx.from.id);
+    const user = ctx.user;
     if (!user) return;
-    const session = await state.getSession(ctx.from.id);
-    if (user.status !== 'awaiting_phone' && session.page !== 'awaiting_phone') return;
+    // Telefon allaqachon bor — qaytadan saqlamaymiz, foydalanuvchini main menyuga
+    if (user.phone) {
+      await renderMain(ctx, user);
+      return;
+    }
 
-    const copy = getCopy(user, ctx);
+    const copy = ctx.copy;
     const contact = ctx.message.contact;
     if (contact.user_id !== ctx.from.id) {
       await ctx.reply(copy.sendOwnContact);
@@ -161,11 +160,8 @@ function register(bot) {
   bot.on('text', async (ctx, next) => {
     const text = (ctx.message.text || '').trim();
     if (text.startsWith('/')) return next();
-
-    const user = await db.getUser(ctx.from.id);
-    if (!user) return;
-
-    await routeText(ctx, user, text);
+    if (!ctx.user) return;
+    await routeText(ctx, ctx.user, text);
   });
 }
 
@@ -585,18 +581,13 @@ async function assignGroupToSheet(ctx, user, sheetPk, group) {
 // helpers
 // ============================================================
 
-async function ensureUser(ctx) {
-  const upserted = await db.upsertUser({
-    telegramId: ctx.from.id,
-    username: ctx.from.username,
-    firstName: ctx.from.first_name,
-    language: ctx.from.language_code,
-  });
-  const user = await db.getUser(ctx.from.id);
-  return { user, isFirstTime: !!upserted.__created };
-}
-
+/**
+ * Foydalanuvchi tilidagi messages obyektini ctx dan oladi.
+ * Auth middleware ctx.copy ni o'rnatadi; agar yo'q bo'lsa user.language ga
+ * fallback qilamiz.
+ */
 function getCopy(user, ctx) {
+  if (ctx?.copy) return ctx.copy;
   return messages.forLanguage(inferUserLanguage(user, ctx?.from?.language_code));
 }
 

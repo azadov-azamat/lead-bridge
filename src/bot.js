@@ -16,9 +16,14 @@ const groupHandler = require('./bot/groupHandler');
 const storyMentionHandler = require('./bot/storyMentionHandler');
 const messages = require('./bot/messages');
 const { inferUserLanguage } = require('./bot/i18n');
+const { auth } = require('./bot/auth');
 const db = require('./db');
 
 const bot = new Telegraf(config.telegramBotToken);
+
+// Auth middleware — birinchi navbatda. ctx.user, ctx.session, ctx.copy,
+// ctx.isFirstTime ni o'rnatadi va eski user.status qoldiqlarini normallashtiradi.
+bot.use(auth);
 
 // Handler ro'yxati
 storyMentionHandler.register(bot);

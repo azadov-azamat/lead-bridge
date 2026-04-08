@@ -20,7 +20,8 @@
       "Bash(node -c src/bot/state.js)",
       "Bash(node -c src/bot/messages.js)",
       "Bash(node -c src/bot.js)",
-      "Bash(node -c src/db/migrations/20260409170000-add-soft-delete-to-sheets.js)"
+      "Bash(node -c src/db/migrations/20260409170000-add-soft-delete-to-sheets.js)",
+      "Bash(node -c src/bot/auth.js)"
     ]
   }
 }
