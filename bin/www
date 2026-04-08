@@ -3,55 +3,150 @@
 /**
  * Lead Bridge bot — process entry point.
  *
- * Boot ketma-ketligi:
- *   1. Postgres ulanish (sequelize.authenticate)
- *   2. Pending migration'larni qo'llash (umzug.up — idempotent)
- *   3. Redis ready'ni kutish
- *   4. HTTP server'ni `PORT` da launch qilish
- *   5. Bot'ni dual rejimda ishga tushirish:
- *        - production → webhook (setWebhook)
- *        - development → long polling (deleteWebhook + bot.launch)
- *   6. Poller (Redis distributed lock bilan)
+ * Cluster mode:
+ *   - Primary process N ta worker fork qiladi (`WEB_CONCURRENCY` yoki cpuCount).
+ *   - Worker crash bo'lsa avtomatik respawn (graceful disconnect bo'lmasa).
+ *   - SIGTERM/SIGINT — primary cluster.disconnect() chaqiradi, workerlar
+ *     graceful shutdown qiladi.
  *
- * Graceful shutdown (SIGINT/SIGTERM):
- *   poller.stop → bot.stop / deleteWebhook → server.close → redis.quit → sequelize.close
+ * Worker tartibi:
+ *   - Hamma worker'lar: HTTP server, Redis, Postgres ulanish, webhook callback (prod).
+ *   - FAQAT primary worker (BOT_PRIMARY_WORKER, default 1):
+ *       * migration'larni qo'llash (race himoyasi)
+ *       * bot.launch() / setWebhook
+ *       * poller.start
  *
- * Eslatma: hozir single-process. Kelajakda multi-worker kerak bo'lsa,
- * `node:cluster` qo'shilib, faqat birinchi worker bot va pollerni ishga
- * tushiradi (qolganlari faqat HTTP webhook callback xizmat qiladi).
+ * Bu pattern Telegram polling/webhook'ni double process qilishni oldini oladi
+ * (faqat bitta jarayon polling qiladi yoki webhook'ni register qiladi).
+ *
+ * Memory monitor:
+ *   - Har worker o'z heap'ini kuzatadi.
+ *   - Critical threshold (default 450MB) → graceful shutdown trigger.
+ *   - `node --expose-gc bin/www` bilan ishga tushirilsa, warning'da forced GC.
  */
 
 require('dotenv').config();
 
-const http = require('http');
+const cluster = require('node:cluster');
+const os = require('node:os');
 
 const config = require('../src/config');
+
+// ============================================================
+// PRIMARY (master) jarayon
+// ============================================================
+if (cluster.isPrimary) {
+  const cpuCount = os.cpus().length;
+  const workerCount =
+    config.webConcurrency && config.webConcurrency > 0
+      ? config.webConcurrency
+      : cpuCount;
+
+  console.log(
+    `[primary] pid=${process.pid} ${workerCount} ta worker ishga tushirilmoqda (cpuCount=${cpuCount})`
+  );
+
+  let isShuttingDown = false;
+
+  for (let i = 0; i < workerCount; i++) {
+    cluster.fork();
+  }
+
+  cluster.on('online', (worker) => {
+    console.log(`[primary] worker ${worker.id} (pid=${worker.process.pid}) online`);
+  });
+
+  cluster.on('exit', (worker, code, signal) => {
+    const reason = `code=${code}${signal ? ` signal=${signal}` : ''}`;
+    console.warn(
+      `[primary] worker ${worker.id} (pid=${worker.process.pid}) exited (${reason})`
+    );
+
+    if (isShuttingDown) {
+      // Shutdown jarayonida worker exit normal
+      const remaining = Object.values(cluster.workers || {}).length;
+      if (remaining === 0) {
+        console.log('[primary] barcha worker yopildi, primary ham chiqadi');
+        process.exit(0);
+      }
+      return;
+    }
+
+    if (worker.exitedAfterDisconnect) {
+      // Graceful disconnect — respawn kerak emas
+      return;
+    }
+
+    // Crash → respawn
+    console.warn('[primary] worker respawn qilinmoqda...');
+    cluster.fork();
+  });
+
+  function primaryShutdown(signal) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[primary] ${signal} — workerlarga disconnect signali yuborilmoqda`);
+    for (const worker of Object.values(cluster.workers || {})) {
+      try {
+        worker.disconnect();
+      } catch (_) {}
+    }
+    // Safety net: 30s ichida workerlar yopilmasa, force exit
+    setTimeout(() => {
+      console.warn('[primary] timeout — force exit');
+      process.exit(1);
+    }, 30 * 1000).unref();
+  }
+
+  process.once('SIGINT', () => primaryShutdown('SIGINT'));
+  process.once('SIGTERM', () => primaryShutdown('SIGTERM'));
+
+  // Primary branch tugadi — return qilamiz
+  return;
+}
+
+// ============================================================
+// WORKER jarayoni
+// ============================================================
+
+const http = require('http');
+
 const app = require('../src/app');
 const bot = require('../src/bot');
 const poller = require('../src/poller');
 const redis = require('../src/redis');
 const { sequelize } = require('../src/db/models');
 const { migrator } = require('../src/db/umzug');
+const { createMemoryMonitor } = require('../src/utils/memory-monitor');
 
 const isProd = config.nodeEnv === 'production';
+const workerId = cluster.worker ? cluster.worker.id : 1;
+const isBotWorker = workerId === config.botPrimaryWorker;
 
 let server = null;
+let memoryMonitor = null;
 let isShuttingDown = false;
 
 async function main() {
+  console.log(
+    `[worker ${workerId}] pid=${process.pid} bot=${isBotWorker ? 'YES' : 'no'}`
+  );
+
   // ---- 1. Postgres ----
   await sequelize.authenticate();
-  console.log('[db] Postgres ulanish OK');
+  console.log(`[worker ${workerId}] Postgres ulanish OK`);
 
-  // ---- 2. Migrations ----
-  const applied = await migrator.up();
-  if (applied.length > 0) {
-    console.log(
-      `[db] ${applied.length} ta migration qo'llandi:`,
-      applied.map((m) => m.name)
-    );
-  } else {
-    console.log("[db] migration o'zgarishlari yo'q");
+  // ---- 2. Migrations (faqat bot worker race oldini olish uchun) ----
+  if (isBotWorker) {
+    const applied = await migrator.up();
+    if (applied.length > 0) {
+      console.log(
+        `[worker ${workerId}] ${applied.length} ta migration qo'llandi:`,
+        applied.map((m) => m.name)
+      );
+    } else {
+      console.log(`[worker ${workerId}] migration o'zgarishlari yo'q`);
+    }
   }
 
   // ---- 3. Redis ----
@@ -71,44 +166,65 @@ async function main() {
   }
 
   // ---- 4. HTTP server ----
+  // Cluster mode: bir nechta worker bir xil portda listen qila oladi
+  // (Node OS-level shared port qiladi)
   server = http.createServer(app);
   await new Promise((resolve, reject) => {
     server.once('error', onListenError(reject));
     server.listen(config.port, () => {
       server.off('error', onListenError(reject));
-      console.log(`[http] ${config.port} portda tinglanmoqda`);
+      console.log(`[worker ${workerId}] HTTP ${config.port} portda tinglanmoqda`);
       resolve();
     });
   });
-  server.on('error', (err) => console.error('[http] xato:', err));
+  server.on('error', (err) => console.error(`[worker ${workerId}] HTTP xato:`, err));
 
-  // ---- 5. Bot (dual mode) ----
-  if (isProd) {
-    if (!config.backHostName) {
-      throw new Error(
-        "BACK_HOST_NAME .env da ko'rsatilmagan (production webhook URL kerak)"
-      );
+  // ---- 5. Memory monitor ----
+  memoryMonitor = createMemoryMonitor({
+    maxHeapUsedMb: config.memoryMaxHeapMb,
+    criticalHeapUsedMb: config.memoryCriticalHeapMb,
+    checkIntervalMs: config.memoryCheckIntervalMs,
+    onCriticalMemory: () => {
+      console.error(`[worker ${workerId}] critical memory — shutdown`);
+      shutdown('critical memory');
+    },
+  });
+  memoryMonitor.start();
+  memoryMonitor.logMemoryUsage(`[worker ${workerId} mem]`);
+
+  // ---- 6. Bot (faqat primary worker) ----
+  if (isBotWorker) {
+    if (isProd) {
+      if (!config.backHostName) {
+        throw new Error(
+          "BACK_HOST_NAME .env da ko'rsatilmagan (production webhook URL kerak)"
+        );
+      }
+      const webhookUrl = `${config.backHostName}${config.webhookPath}`;
+      await bot.telegram.setWebhook(webhookUrl, { drop_pending_updates: false });
+      console.log(`[worker ${workerId}] webhook set: ${webhookUrl}`);
+    } else {
+      // Dev: webhook'ni o'chirib, polling'ni boshlaymiz
+      await bot.telegram
+        .deleteWebhook({ drop_pending_updates: false })
+        .catch(() => {});
+      if (!bot.__launched) {
+        bot.launch({ polling: { timeout: 30, limit: 50 } });
+        bot.__launched = true;
+        console.log(`[worker ${workerId}] polling boshlandi (development)`);
+      }
     }
-    const webhookUrl = `${config.backHostName}${config.webhookPath}`;
-    await bot.telegram.setWebhook(webhookUrl, { drop_pending_updates: false });
-    console.log(`[bot] webhook set: ${webhookUrl}`);
+
+    const me = await bot.telegram.getMe();
+    console.log(`[worker ${workerId}] @${me.username} ishga tushdi`);
+
+    // ---- 7. Poller (faqat primary worker) ----
+    poller.start(bot);
   } else {
-    // Dev: webhook'ni o'chirib, polling'ni boshlaymiz
-    await bot.telegram
-      .deleteWebhook({ drop_pending_updates: false })
-      .catch(() => {});
-    if (!bot.__launched) {
-      bot.launch({ polling: { timeout: 30, limit: 50 } });
-      bot.__launched = true;
-      console.log('[bot] polling boshlandi (development)');
-    }
+    console.log(
+      `[worker ${workerId}] bot/poller skip (BOT_PRIMARY_WORKER=${config.botPrimaryWorker})`
+    );
   }
-
-  const me = await bot.telegram.getMe();
-  console.log(`[bot] @${me.username} ishga tushdi`);
-
-  // ---- 6. Poller ----
-  poller.start(bot);
 }
 
 // ============================================================
@@ -119,54 +235,75 @@ function onListenError(reject) {
     if (err.syscall !== 'listen') return reject(err);
     switch (err.code) {
       case 'EACCES':
-        console.error(`[http] ${config.port} portda elevated privileges kerak`);
+        console.error(`[worker ${workerId}] ${config.port} elevated privileges kerak`);
         break;
       case 'EADDRINUSE':
-        console.error(`[http] ${config.port} port band`);
+        console.error(`[worker ${workerId}] ${config.port} port band`);
         break;
       default:
-        console.error('[http] listen xato:', err);
+        console.error(`[worker ${workerId}] listen xato:`, err);
     }
     reject(err);
   };
 }
 
 // ============================================================
-// Graceful shutdown
+// Graceful shutdown (worker)
 // ============================================================
 async function shutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(`\n[shutdown] ${signal} qabul qilindi, yopilmoqda...`);
+  console.log(`[worker ${workerId}] ${signal} — yopilmoqda...`);
 
+  // Memory monitor stop
   try {
-    await poller.stop();
+    if (memoryMonitor) memoryMonitor.stop();
+  } catch (_) {}
+
+  // Cluster disconnect — primary'ga signal beradi
+  if (cluster.worker) {
+    try {
+      cluster.worker.disconnect();
+    } catch (_) {}
+  }
+
+  // Poller (inflight tickni kutadi)
+  try {
+    if (isBotWorker) await poller.stop();
   } catch (err) {
     console.error('[shutdown] poller.stop xato:', err.message);
   }
 
+  // Bot
   try {
-    if (isProd) {
-      await bot.telegram
-        .deleteWebhook({ drop_pending_updates: false })
-        .catch(() => {});
-    } else if (bot.__launched) {
-      bot.stop(signal);
-      bot.__launched = false;
+    if (isBotWorker) {
+      if (isProd) {
+        await bot.telegram
+          .deleteWebhook({ drop_pending_updates: false })
+          .catch(() => {});
+      } else if (bot.__launched) {
+        bot.stop(signal);
+        bot.__launched = false;
+      }
     }
   } catch (err) {
     console.error('[shutdown] bot stop xato:', err.message);
   }
 
-  if (server) {
+  // HTTP server (cluster.disconnect() shared handle'ni avtomatik yopadi —
+  // shuning uchun listening bo'lsa-gina explicit close qilamiz)
+  if (server && server.listening) {
     await new Promise((resolve) => {
       server.close((err) => {
-        if (err) console.error('[shutdown] server.close xato:', err.message);
+        if (err && !/not running/i.test(err.message)) {
+          console.error('[shutdown] server.close xato:', err.message);
+        }
         resolve();
       });
     });
   }
 
+  // Redis va Postgres
   await redis
     .close()
     .catch((e) => console.error('[shutdown] redis xato:', e.message));
@@ -174,12 +311,14 @@ async function shutdown(signal) {
     .close()
     .catch((e) => console.error('[shutdown] sequelize xato:', e.message));
 
-  console.log('[shutdown] tayyor');
+  console.log(`[worker ${workerId}] tayyor`);
   process.exit(0);
 }
 
 process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
+// Cluster disconnect signal (primary cluster.disconnect() chaqirganida)
+process.once('disconnect', () => shutdown('disconnect'));
 
 // Process-level safety nets
 process.on('unhandledRejection', (reason) => {
@@ -191,6 +330,6 @@ process.on('uncaughtException', (err) => {
 });
 
 main().catch((err) => {
-  console.error('[boot] xato:', err);
+  console.error(`[worker ${workerId}] boot xato:`, err);
   process.exit(1);
 });
