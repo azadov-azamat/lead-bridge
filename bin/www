@@ -218,6 +218,13 @@ async function main() {
     const me = await bot.telegram.getMe();
     console.log(`[worker ${workerId}] @${me.username} ishga tushdi`);
 
+    // Telegram "/" menyusini yangilaymiz (idempotent)
+    try {
+      await bot.setupCommandMenu();
+    } catch (err) {
+      console.error(`[worker ${workerId}] setupCommandMenu xato:`, err.message);
+    }
+
     // ---- 7. Poller (faqat primary worker) ----
     poller.start(bot);
   } else {
