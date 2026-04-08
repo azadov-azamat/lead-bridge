@@ -11,6 +11,7 @@
 
 const { Op } = require('sequelize');
 const { sequelize, User, Sheet, SentLead } = require('./db/models');
+const redis = require('./redis');
 
 // ============================================================
 // USER queries
@@ -111,10 +112,11 @@ async function countVerifiedSheets(userTelegramId) {
 }
 
 /**
- * Poller uchun: barcha verified sheetlar, ularning egasi guruhga ulangan.
+ * Poller uchun: barcha verified sheetlar, ularning egasi guruhga ulangan
+ * VA bot guruhda admin huquqiga ega.
  *
- * `include` bilan user join qilamiz, `required: true` INNER JOIN qiladi.
- * Caller bevosita `sheet.user.groupId` ishlatadi.
+ * `bot_is_admin=true` shartini qo'shamiz: bot admin bo'lmagan guruhlarga
+ * lead jo'natmaymiz (foydalanuvchi avval admin qilishi kerak).
  */
 async function getSheetsForPolling() {
   const sheets = await Sheet.findAll({
@@ -127,12 +129,69 @@ async function getSheetsForPolling() {
         where: {
           status: 'ready',
           groupId: { [Op.ne]: null },
+          botIsAdmin: true,
         },
       },
     ],
   });
-  // POJO ga aylantiramiz (associated user bilan birga)
   return sheets.map((s) => s.toJSON());
+}
+
+/**
+ * Bot admin BO'LMAGAN userlar uchun: verified sheetlar bilan birga.
+ * Poller "you have leads but bot is not admin" alert mantig'i uchun.
+ */
+async function getSheetsAwaitingAdmin() {
+  const sheets = await Sheet.findAll({
+    where: { status: 'verified' },
+    include: [
+      {
+        model: User,
+        as: 'user',
+        required: true,
+        where: {
+          status: 'ready',
+          groupId: { [Op.ne]: null },
+          botIsAdmin: false,
+        },
+      },
+    ],
+  });
+  return sheets.map((s) => s.toJSON());
+}
+
+// ============================================================
+// NOT-ADMIN ALERT throttle (Redis)
+// ============================================================
+//
+// Bot admin emas, lekin yangi leadlar kelmoqda. User'ni cheksiz spam'lamaslik
+// uchun har userga `notAdminAlertTtlMs` (default 4 soat) ichida bittadan
+// ko'p alert yubormaymiz. Redis SET NX EX orqali atomic.
+
+const NOT_ADMIN_ALERT_KEY = (telegramId) => `alert:not_admin:${telegramId}`;
+const DEFAULT_ALERT_TTL_MS = 4 * 60 * 60 * 1000; // 4 soat
+
+/**
+ * Alert yuborishga ruxsat bermi? Lock olsa true, aks holda false.
+ * TTL o'tgach yana ruxsat beriladi.
+ */
+async function tryClaimNotAdminAlert(telegramId, ttlMs = DEFAULT_ALERT_TTL_MS) {
+  const result = await redis.redis.set(
+    NOT_ADMIN_ALERT_KEY(telegramId),
+    String(Date.now()),
+    'PX',
+    ttlMs,
+    'NX'
+  );
+  return result === 'OK';
+}
+
+/**
+ * User admin qilingach lock'ni darhol tozalaymiz — keyingi marta
+ * (agar yana demote qilinsa) alert ishlay olsin.
+ */
+async function clearNotAdminAlert(telegramId) {
+  await redis.redis.del(NOT_ADMIN_ALERT_KEY(telegramId));
 }
 
 // ============================================================
@@ -194,10 +253,15 @@ module.exports = {
   listUserSheets,
   countVerifiedSheets,
   getSheetsForPolling,
+  getSheetsAwaitingAdmin,
 
   // SentLead
   getSentLeadIds,
   markLeadSent,
+
+  // Not-admin alert throttle
+  tryClaimNotAdminAlert,
+  clearNotAdminAlert,
 
   // Computed
   isUserActive,

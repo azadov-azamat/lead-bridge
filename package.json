@@ -2,10 +2,10 @@
   "name": "lead-bridge",
   "version": "2.1.0",
   "description": "Self-serve Telegram bot: Facebook Lead Ads → Google Sheet → Telegram guruh",
-  "main": "src/index.js",
+  "main": "bin/www",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "start": "node bin/www",
+    "dev": "node --watch bin/www",
     "db:migrate": "node src/db/umzug.js up",
     "db:migrate:undo": "node src/db/umzug.js down",
     "db:migrate:status": "node src/db/umzug.js status"

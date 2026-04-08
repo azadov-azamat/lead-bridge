@@ -122,6 +122,47 @@ module.exports = {
     `Iltimos, sozlamalardan meni admin qilib belgilang — aks holda xabar jo'nata olmayman.`,
 
   /**
+   * Bot guruhga qo'shildi, lekin admin emas — userga DM da batafsil instruktsiya.
+   */
+  notAdminDm: (groupTitle) =>
+    `⚠️ Men <b>${groupTitle}</b> guruhiga qo'shildim, lekin <b>admin</b> emasman.\n\n` +
+    `Xavfsizlik uchun men admin bo'lmaguncha leadlarni guruhga jo'natmayman.\n\n` +
+    `<b>Meni qanday admin qilish:</b>\n` +
+    `1. Guruh sozlamalarini oching\n` +
+    `2. <b>"Administrators"</b> bo'limiga kiring\n` +
+    `3. <b>"Add Administrator"</b> bosing\n` +
+    `4. Mening profilimni tanlang\n` +
+    `5. Saqlang\n\n` +
+    `Tayyor bo'lganingizdan so'ng leadlar avtomatik yetib kela boshlaydi. ✨`,
+
+  /**
+   * Yangi leadlar bor, lekin bot hali admin emas — throttled alert (DM).
+   * count — kutilayotgan unsent leadlar soni.
+   */
+  notAdminAlert: (count, groupTitle) =>
+    `🔔 <b>Yangi ${count} ta lead keldi!</b>\n\n` +
+    `Lekin men <b>${groupTitle}</b> guruhida hali admin emasman, shuning uchun ularni sizga jo'nata olmayapman.\n\n` +
+    `<b>Leadlarni ko'rish uchun meni admin qiling:</b>\n` +
+    `1. Guruh sozlamalari → <b>Administrators</b>\n` +
+    `2. <b>Add Administrator</b> → meni tanlang\n` +
+    `3. Saqlang\n\n` +
+    `Admin bo'lganimdan so'ng to'plangan barcha leadlarni darhol jo'nataman. 📨`,
+
+  /**
+   * Bot admin qilindi (member → administrator).
+   */
+  botPromoted: (groupTitle) =>
+    `✅ <b>Rahmat!</b> Endi men <b>${groupTitle}</b> guruhida adminman.\n\n` +
+    `Yangi leadlar avtomatik kelib turadi. Agar to'plangan leadlar bo'lsa, hozir jo'nataman. 📨`,
+
+  /**
+   * Bot admin huquqidan mahrum qilindi (administrator → member).
+   */
+  botDemoted: (groupTitle) =>
+    `⚠️ Men <b>${groupTitle}</b> guruhida admin huquqidan mahrum qilindim.\n\n` +
+    `Endi leadlarni guruhga jo'nata olmayman. Iltimos, meni qaytadan admin qiling — aks holda yangi leadlar to'planib qoladi.`,
+
+  /**
    * User boshqa guruhga botni qo'shganda (allaqachon bog'langan).
    */
   alreadyBoundDm: (oldGroupId) =>

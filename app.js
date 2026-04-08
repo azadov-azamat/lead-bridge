@@ -102,10 +102,6 @@ if (process.env.NODE_ENV === 'production') {
   app.use(bot.webhookCallback('/api/webhook_telegram'));
 }
 
-app.use('/admin/queues', require('./server/routes/admin-queues'));
-
-// Routes
-app.use(require('./server/routes'));
 
 const getCachedWebhookReadiness = async () => {
   const now = Date.now();

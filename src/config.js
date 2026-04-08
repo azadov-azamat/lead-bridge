@@ -49,8 +49,4 @@ module.exports = {
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '60000', 10),
   // Distributed lock TTL — bitta tick maksimal davomiyligi.
   pollerLockTtlMs: parseInt(process.env.POLLER_LOCK_TTL_MS || '300000', 10),
-
-  adminTelegramId: process.env.ADMIN_TELEGRAM_ID
-    ? parseInt(process.env.ADMIN_TELEGRAM_ID, 10)
-    : null,
 };

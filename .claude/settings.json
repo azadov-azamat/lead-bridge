@@ -6,7 +6,8 @@
       "Bash(node -e ':*)",
       "Bash(node -e \"require\\('./src/db.js'\\); require\\('./src/poller.js'\\); require\\('./src/bot/onboarding.js'\\); require\\('./src/bot/groupHandler.js'\\); require\\('./src/db/umzug.js'\\); console.log\\('all modules load OK'\\); process.exit\\(0\\);\")",
       "Bash(yarn db:migrate:status)",
-      "Bash(yarn db:migrate)"
+      "Bash(yarn db:migrate)",
+      "Bash(chmod +x /Users/azadov.za/repos/lead-bridge/bin/www)"
     ]
   }
 }

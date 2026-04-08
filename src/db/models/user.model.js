@@ -49,6 +49,11 @@ module.exports = (sequelize) => {
         allowNull: true,
         unique: true,
       },
+      botIsAdmin: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
       status: {
         type: DataTypes.ENUM(...STATUSES),
         allowNull: false,
