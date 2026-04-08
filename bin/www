@@ -1,0 +1,183 @@
+#!/usr/bin/env node
+require('dotenv').config();
+
+const cluster = require('node:cluster');
+const os = require('node:os');
+const debug = require('debug')('www');
+
+const cpuCount = os.cpus().length;
+const parsedConcurrency = parseInt(process.env.WEB_CONCURRENCY, 10);
+const workerCount = Number.isFinite(parsedConcurrency) && parsedConcurrency > 0 ? parsedConcurrency : cpuCount;
+
+if (cluster.isPrimary) {
+  debug(`Primary ${process.pid} starting ${workerCount} worker${workerCount === 1 ? '' : 's'}.`);
+
+  for (let i = 0; i < workerCount; i += 1) {
+    cluster.fork();
+  }
+
+  cluster.on('exit', (worker, code, signal) => {
+    const exitDescriptor = `code ${code}${signal ? `, signal ${signal}` : ''}`;
+    console.warn(`Worker ${worker.process.pid} exited (${exitDescriptor}).`);
+
+    if (worker.exitedAfterDisconnect) {
+      debug(`Worker ${worker.process.pid} disconnected intentionally; not respawning.`);
+      return;
+    }
+
+    debug('Respawning replacement worker.');
+    cluster.fork();
+  });
+
+  return;
+}
+
+// Worker branch
+const http = require('http');
+const { createMemoryMonitor } = require('../server/utils/memory-monitor');
+const app = require('../app');
+const bot = require('../server/bot-app/index');
+
+const port = process.env.PORT || 8080;
+const workerId = cluster.worker ? cluster.worker.id : 0;
+const configuredBotWorker = parseInt(process.env.BOT_PRIMARY_WORKER || '', 10);
+const botWorkerTarget = Number.isFinite(configuredBotWorker) && configuredBotWorker > 0 ? configuredBotWorker : 1;
+const shouldInitializeBot = workerId === botWorkerTarget;
+
+const server = http.createServer(app);
+
+const memoryMonitor = createMemoryMonitor({
+  maxHeapUsed: 400 * 1024 * 1024, // 400MB
+  criticalHeapUsed: 450 * 1024 * 1024, // 450MB
+  checkInterval: 2 * 60 * 1000, // Check every 2 minutes
+  onCriticalMemory: memInfo => {
+    const mb = bytes => Math.round((bytes / 1024 / 1024) * 100) / 100;
+    console.error(`🚨 Critical memory in worker ${workerId}: ${mb(memInfo.heapUsed)}MB`);
+    shutdown('Critical memory usage');
+  },
+});
+
+// Start memory monitoring
+memoryMonitor.start();
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  let bind = 'Port ' + port;
+
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+server.listen(port, function () {
+  if (shouldInitializeBot) {
+    if (process.env.NODE_ENV === 'production') {
+      bot.telegram.setWebhook(`${process.env.BACK_HOST_NAME}/api/webhook_telegram`);
+      console.log('Webhook set for production.');
+    } else {
+      // Ensure webhook is OFF in dev, then start polling ONCE
+      try {
+        bot.telegram.deleteWebhook({ drop_pending_updates: true });
+      } catch {}
+      if (!bot.__launched) {
+        bot.launch({ polling: { timeout: 30, limit: 50 } });
+        bot.__launched = true; // guard against re-launch by hot reloaders
+        console.log('Polling started in development.');
+      }
+    }
+  } else {
+    debug(`Worker ${workerId} skipping bot initialization.`);
+  }
+
+  debug(`Worker ${workerId} listening on port ${server.address().port}`);
+
+  // Log initial memory usage
+  memoryMonitor.logMemoryUsage();
+
+  // Periodic cleanup
+  setInterval(
+    async () => {
+      try {
+        await memoryMonitor.cleanupAllSessionInteractions();
+        if (global.gc) {
+          global.gc();
+        }
+      } catch (err) {
+        debug('Error during periodic cleanup:', err);
+      }
+    },
+    5 * 60 * 1000
+  ); // Every 5 minutes
+});
+
+server.on('error', onError);
+
+// Enable graceful stop
+const shutdown = async reason => {
+  console.log(`Worker ${workerId} shutting down gracefully (${reason})...`);
+
+  try {
+    if (cluster.worker) {
+      cluster.worker.disconnect();
+    }
+
+    // Stop memory monitor
+    if (memoryMonitor) {
+      memoryMonitor.stop();
+    }
+
+    if (shouldInitializeBot && bot.__launched) {
+      try {
+        await bot.stop(reason);
+      } catch (e) {
+        /* ignore if not running */
+      }
+      bot.__launched = false;
+    }
+
+    if (shouldInitializeBot) {
+      try {
+        await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+      } catch {}
+    }
+
+    if (shouldInitializeBot) {
+      console.log('Webhook deregistered and bot shutdown gracefully.');
+    }
+    server.close(() => {
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+};
+
+// Handle memory pressure warnings
+process.on('warning', warning => {
+  if (
+    warning.name === 'MaxListenersExceededWarning' ||
+    warning.message?.includes('memory') ||
+    warning.message?.includes('heap')
+  ) {
+    console.warn('Memory warning:', warning.message);
+    memoryMonitor.forceGarbageCollection();
+  }
+});
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+console.log(`Worker ${workerId} listening on port: ${port}`);
