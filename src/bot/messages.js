@@ -142,10 +142,8 @@ module.exports = {
   notAdminAlert: (count, groupTitle) =>
     `🔔 <b>Yangi ${count} ta lead keldi!</b>\n\n` +
     `Lekin men <b>${groupTitle}</b> guruhida hali admin emasman, shuning uchun ularni sizga jo'nata olmayapman.\n\n` +
-    `<b>Leadlarni ko'rish uchun meni admin qiling:</b>\n` +
-    `1. Guruh sozlamalari → <b>Administrators</b>\n` +
-    `2. <b>Add Administrator</b> → meni tanlang\n` +
-    `3. Saqlang\n\n` +
+    `<b>Leadlarni ko'rish uchun meni admin qiling</b>\n` +
+    
     `Admin bo'lganimdan so'ng to'plangan barcha leadlarni darhol jo'nataman. 📨`,
 
   /**

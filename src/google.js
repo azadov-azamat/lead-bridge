@@ -1,55 +1,27 @@
-const fs = require('fs');
+/**
+ * Google Sheets / Drive integration.
+ *
+ * Auth: faqat OAuth (refresh token bilan). Service account fallback olib
+ * tashlangan — Render OAuth via GOOGLE_OAUTH_* env'lar bilan ishlaydi.
+ */
+
 const { google } = require('googleapis');
 const config = require('./config');
 
 // Facebook Lead Center Google Sheets integratsiyasi shu ustunlarni yozadi
 const FB_SIGNATURE_COLUMNS = ['id', 'created_time', 'form_id', 'form_name'];
-const GOOGLE_SCOPES = [
-  'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/script.projects',
-];
 
-// Google autentifikatsiyasi (OAuth default, kerak bo'lsa service account fallback)
 let cachedAuth = null;
-
-function getAuthMode() {
-  return config.googleAuthMode;
-}
 
 function getAuth() {
   if (cachedAuth) return cachedAuth;
 
-  if (getAuthMode() === 'oauth') {
-    if (
-      !config.googleOAuthClientId ||
-      !config.googleOAuthClientSecret ||
-      !config.googleOAuthRefreshToken
-    ) {
-      throw new Error(
-        'Google OAuth sozlanmagan. GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET va GOOGLE_OAUTH_REFRESH_TOKEN kerak.'
-      );
-    }
-
-    cachedAuth = new google.auth.OAuth2(
-      config.googleOAuthClientId,
-      config.googleOAuthClientSecret
-    );
-    cachedAuth.setCredentials({
-      refresh_token: config.googleOAuthRefreshToken,
-    });
-    return cachedAuth;
-  }
-
-  if (!fs.existsSync(config.googleCredentialsPath)) {
-    throw new Error(
-      `Google credential topilmadi. OAuth uchun env'larni to'ldiring yoki service account JSON qo'ying: ${config.googleCredentialsPath}`
-    );
-  }
-
-  cachedAuth = new google.auth.GoogleAuth({
-    keyFile: config.googleCredentialsPath,
-    scopes: GOOGLE_SCOPES,
+  cachedAuth = new google.auth.OAuth2(
+    config.googleOAuthClientId,
+    config.googleOAuthClientSecret
+  );
+  cachedAuth.setCredentials({
+    refresh_token: config.googleOAuthRefreshToken,
   });
   return cachedAuth;
 }
@@ -60,38 +32,6 @@ function getSheetsClient() {
 
 function getDriveClient() {
   return google.drive({ version: 'v3', auth: getAuth() });
-}
-
-function isPermissionDeniedError(err) {
-  return (
-    err?.code === 403 ||
-    err?.response?.status === 403 ||
-    err?.response?.data?.error?.status === 'PERMISSION_DENIED' ||
-    /does not have permission/i.test(err?.message || '')
-  );
-}
-
-async function explainSpreadsheetCreateError(err, drive) {
-  if (getAuthMode() !== 'oauth' && isPermissionDeniedError(err)) {
-    try {
-      const about = await drive.about.get({
-        fields: 'user(emailAddress),storageQuota(limit)',
-      });
-      if (about.data?.storageQuota?.limit === '0') {
-        const email = about.data?.user?.emailAddress || 'service account';
-        return (
-          `Sheet yaratib bo'lmadi: ${email} uchun Google Drive storage quota 0. ` +
-          `Bu service account yangi Google Sheet'ga owner bo'la olmaydi. ` +
-          `Yechim: service account'ni Shared Drive'ga qo'shing va sheet'ni o'sha yerda yarating, ` +
-          `yoki oddiy Google OAuth orqali foydalanuvchi nomidan yarating.`
-        );
-      }
-    } catch (_) {
-      // Asl xatoni saqlab qolamiz; diagnostika yordam bermasa generic xabar qaytariladi.
-    }
-  }
-
-  return `Sheet yaratib bo'lmadi (Sheets API muammo bo'lishi mumkin): ${err.message}`;
 }
 
 function normalizeEmail(email) {
@@ -110,7 +50,7 @@ async function shareSheet(drive, { sheetId, sheetUrl, email, anyone }) {
       sendNotificationEmail: !anyone,
       emailMessage: anyone
         ? undefined
-        : 'Lead Bridge bot sizga Google Sheet tayyorladi. Bu sheet\'ni Facebook Lead Center\'ga ulang — keyingi qadamlar botda.',
+        : "Lead Bridge bot sizga Google Sheet tayyorladi. Bu sheet'ni Facebook Lead Center'ga ulang — keyingi qadamlar botda.",
     });
   } catch (err) {
     const hint = anyone
@@ -121,9 +61,9 @@ async function shareSheet(drive, { sheetId, sheetUrl, email, anyone }) {
 }
 
 /**
- * Yangi Google Sheet yaratadi va "anyone with link can edit" sifatida ochadi.
- * Hech qanday email kerak emas — har kim link orqali kirib tahrirlay oladi.
- * Return: sheet URL (string)
+ * Yangi Google Sheet yaratadi.
+ * Default: "anyone with link can edit" (email berilmagan bo'lsa).
+ * Email berilgan bo'lsa: faqat shu userga writer huquqi.
  */
 async function generateSheet(title = 'Lead Bridge Sheet', shareWithEmail = null) {
   const sheets = getSheetsClient();
@@ -138,11 +78,9 @@ async function generateSheet(title = 'Lead Bridge Sheet', shareWithEmail = null)
     sheetId = created.data.spreadsheetId;
     sheetUrl = created.data.spreadsheetUrl;
   } catch (err) {
-    throw new Error(await explainSpreadsheetCreateError(err, drive));
+    throw new Error(`Sheet yaratib bo'lmadi: ${err.message}`);
   }
 
-  // Agar email ko'rsatilgan bo'lsa — shu userga writer huquqi beramiz.
-  // Aks holda — "anyone with link" sharing.
   if (shareWithEmail) {
     const ownerEmail = normalizeEmail(config.googleOwnerEmail);
     const targetEmail = normalizeEmail(shareWithEmail);
@@ -177,19 +115,17 @@ async function createSheetForUser({ title, userEmail }) {
   let res;
   try {
     res = await sheets.spreadsheets.create({
-      requestBody: {
-        properties: { title },
-      },
+      requestBody: { properties: { title } },
       fields: 'spreadsheetId,spreadsheetUrl',
     });
   } catch (err) {
-    throw new Error(await explainSpreadsheetCreateError(err, drive));
+    throw new Error(`Sheet yaratib bo'lmadi: ${err.message}`);
   }
 
   const sheetId = res.data.spreadsheetId;
   const sheetUrl = res.data.spreadsheetUrl;
 
-  // Agar ownerning o'zi bo'lmasa, foydalanuvchi ko'ra olishi uchun share qilamiz
+  // Agar ownerning o'zi bo'lmasa, foydalanuvchi ko'ra olishi uchun share
   const ownerEmail = normalizeEmail(config.googleOwnerEmail);
   const targetEmail = normalizeEmail(userEmail);
   if (!ownerEmail || ownerEmail !== targetEmail) {
@@ -205,8 +141,8 @@ async function createSheetForUser({ title, userEmail }) {
 }
 
 /**
- * Sheet'ning birinchi qatoridagi headerlarni o'qiydi.
- * Facebook Lead Center ustunlari bor-yo'qligini tekshiradi.
+ * Sheet'ning birinchi qatoridagi headerlarni o'qiydi va Facebook Lead Center
+ * ustunlari bor-yo'qligini tekshiradi.
  */
 async function verifyFacebookConnection(sheetId) {
   const sheets = getSheetsClient();
@@ -235,7 +171,7 @@ async function verifyFacebookConnection(sheetId) {
 
 /**
  * Sheet'dagi barcha rowlarni o'qiydi.
- * Return: { headers, rows } — rows har biri { [colName]: value } shaklida
+ * Return: { headers, rows } — har row { [colName]: value } shaklida
  */
 async function readSheetRows(sheetId) {
   const sheets = getSheetsClient();
