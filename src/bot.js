@@ -13,16 +13,37 @@ const { Telegraf } = require('telegraf');
 const config = require('./config');
 const onboarding = require('./bot/onboarding');
 const groupHandler = require('./bot/groupHandler');
+const storyMentionHandler = require('./bot/storyMentionHandler');
+const messages = require('./bot/messages');
+const { inferUserLanguage } = require('./bot/i18n');
+const db = require('./db');
 
 const bot = new Telegraf(config.telegramBotToken);
 
 // Handler ro'yxati
+storyMentionHandler.register(bot);
 onboarding.register(bot);
 groupHandler.register(bot);
 
-// Global xato handler
-bot.catch((err, ctx) => {
+// Global xato handler — texnik xatoni log qilamiz, foydalanuvchiga esa
+// faqat umumiy "xatolik bo'ldi" xabari yuboriladi (texnik tafsilotlarsiz).
+bot.catch(async (err, ctx) => {
   console.error(`[bot] xato (update ${ctx.update.update_id}):`, err);
+  try {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+    let language;
+    try {
+      const user = await db.getUser(telegramId);
+      language = inferUserLanguage(user, ctx.from?.language_code);
+    } catch (_) {
+      language = inferUserLanguage(null, ctx.from?.language_code);
+    }
+    const copy = messages.forLanguage(language);
+    await ctx.reply(copy.errorGeneric);
+  } catch (notifyErr) {
+    console.error('[bot] foydalanuvchini xabardor qilib bo\'lmadi:', notifyErr.message);
+  }
 });
 
 // Hot reloader'lar uchun guard
@@ -37,28 +58,43 @@ bot.__launched = false;
 // userlar bot bilan faqat DM da ishlaydi).
 //
 // `/verify_<id>` dynamic command — menyuda yo'q (ad-hoc).
-const COMMAND_MENU = [
-  { command: 'start', description: "Sozlashni boshlash / holatni ko'rish" },
-  { command: 'status', description: 'Joriy holat' },
-  { command: 'sheets', description: "Barcha Google sheetlarim" },
-  { command: 'newsheet', description: 'Yangi Google Sheet yaratish' },
-  { command: 'changegroup', description: "Telegram guruhini o'zgartirish" },
-  { command: 'reset', description: "Hamma narsani qayta boshlash" },
-  { command: 'help', description: 'Yordam va buyruqlar' },
-];
+const COMMAND_MENU = {
+  uz: [
+    { command: 'start', description: 'Botni ochish va boshlash' },
+    { command: 'status', description: 'Holatimni ko‘rish' },
+    { command: 'sheets', description: 'Sheetlarim ro‘yxati' },
+    { command: 'newsheet', description: 'Yangi sheet yaratish' },
+    { command: 'changegroup', description: 'Guruhni almashtirish' },
+    { command: 'help', description: 'Yordam olish' },
+  ],
+  ru: [
+    { command: 'start', description: 'Открыть бота и начать' },
+    { command: 'status', description: 'Посмотреть статус' },
+    { command: 'sheets', description: 'Список моих sheetов' },
+    { command: 'newsheet', description: 'Создать новый sheet' },
+    { command: 'changegroup', description: 'Сменить группу' },
+    { command: 'help', description: 'Получить помощь' },
+  ],
+};
 
 /**
  * Bot menyusini Telegram'ga register qiladi. Idempotent — har boot'da
  * chaqirsa bo'ladi (Telegram setMyCommands ni o'zi cache qiladi).
  */
 async function setupCommandMenu() {
-  // 1. Default scope (har holatda fallback)
-  await bot.telegram.setMyCommands(COMMAND_MENU);
-  // 2. Private chats — bot DM da ishlaydi, asosiy scope shu
-  await bot.telegram.setMyCommands(COMMAND_MENU, {
+  await bot.telegram.setMyCommands(COMMAND_MENU.uz);
+  await bot.telegram.setMyCommands(COMMAND_MENU.uz, {
     scope: { type: 'all_private_chats' },
   });
-  console.log(`[bot] command menu set (${COMMAND_MENU.length} ta buyruq)`);
+  await bot.telegram.setMyCommands(COMMAND_MENU.uz, {
+    scope: { type: 'all_private_chats' },
+    language_code: 'uz',
+  });
+  await bot.telegram.setMyCommands(COMMAND_MENU.ru, {
+    scope: { type: 'all_private_chats' },
+    language_code: 'ru',
+  });
+  console.log(`[bot] command menu set (${COMMAND_MENU.uz.length} ta buyruq)`);
 }
 
 bot.setupCommandMenu = setupCommandMenu;

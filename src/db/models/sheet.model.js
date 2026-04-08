@@ -43,6 +43,14 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(255),
         allowNull: true,
       },
+      gmail: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+      groupId: {
+        type: DataTypes.BIGINT,
+        allowNull: true,
+      },
       status: {
         type: DataTypes.ENUM(...SHEET_STATUSES),
         allowNull: false,
@@ -62,6 +70,7 @@ module.exports = (sequelize) => {
       indexes: [
         { fields: ['user_telegram_id'] },
         { fields: ['status'] },
+        { fields: ['group_id'] },
       ],
     }
   );

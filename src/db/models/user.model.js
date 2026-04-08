@@ -8,16 +8,17 @@
  * Status enum (faqat profile bosqichlari):
  *   new              -> /start bosildi
  *   awaiting_phone   -> contact share kutilmoqda
- *   awaiting_gmail   -> gmail kutilmoqda
+ *   awaiting_gmail   -> (legacy) — endi ishlatilmaydi, eski rowlar uchun saqlandi
  *   ready            -> profile to'liq, sheet/group qo'shishga tayyor
  *
- * "active"/"done" holati bu yerda yo'q — u computed (isActive helper):
- *   status === 'ready' && groupId !== null && hasVerifiedSheet
+ * Gmail va Telegram guruh endi user darajasida emas — Sheet (va Group) modellarida.
+ * Bitta user N ta sheet va N ta guruhga ega bo'lishi mumkin.
  */
 
 const { DataTypes } = require('sequelize');
 
 const STATUSES = ['new', 'awaiting_phone', 'awaiting_gmail', 'ready'];
+const LANGUAGES = ['uz', 'ru'];
 
 module.exports = (sequelize) => {
   const User = sequelize.define(
@@ -36,23 +37,19 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(255),
         allowNull: true,
       },
+      language: {
+        type: DataTypes.ENUM(...LANGUAGES),
+        allowNull: false,
+        defaultValue: 'uz',
+      },
+      mentionCount: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
       phone: {
         type: DataTypes.STRING(64),
         allowNull: true,
-      },
-      gmail: {
-        type: DataTypes.STRING(255),
-        allowNull: true,
-      },
-      groupId: {
-        type: DataTypes.BIGINT,
-        allowNull: true,
-        unique: true,
-      },
-      botIsAdmin: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-        defaultValue: false,
       },
       status: {
         type: DataTypes.ENUM(...STATUSES),
@@ -67,7 +64,9 @@ module.exports = (sequelize) => {
   );
 
   User.STATUSES = STATUSES;
+  User.LANGUAGES = LANGUAGES;
   return User;
 };
 
 module.exports.STATUSES = STATUSES;
+module.exports.LANGUAGES = LANGUAGES;

@@ -97,10 +97,11 @@ async function activePass(bot) {
         status: 'error',
         errorReason: err.message.slice(0, 500),
       });
+      const copy = messages.forLanguage(sheet.user?.language);
       try {
         await bot.telegram.sendMessage(
           sheet.userTelegramId,
-          `⚠️ Sheet'da muammo bor: <a href="${sheet.spreadsheetUrl}">Sheet</a>\n<code>${escapeHtml(err.message)}</code>\n\n/sheets — holatni ko'rish`,
+          copy.sheetIssue(sheet.spreadsheetUrl, err.message),
           { parse_mode: 'HTML', disable_web_page_preview: true }
         );
       } catch (_) {}
@@ -125,21 +126,22 @@ async function awaitingAdminPass(bot) {
   const sheets = await db.getSheetsAwaitingAdmin();
   if (sheets.length === 0) return 0;
 
-  // Userlar bo'yicha guruhlash: bitta userda bir nechta sheet bo'lishi mumkin
-  const byUser = new Map();
+  // Guruh bo'yicha guruhlash: bitta groupga bir nechta sheet tegishli bo'lishi mumkin
+  const byGroup = new Map();
   for (const sheet of sheets) {
-    if (!byUser.has(sheet.userTelegramId)) {
-      byUser.set(sheet.userTelegramId, { user: sheet.user, sheets: [] });
+    const key = String(sheet.groupId);
+    if (!byGroup.has(key)) {
+      byGroup.set(key, { group: sheet.group, user: sheet.user, sheets: [] });
     }
-    byUser.get(sheet.userTelegramId).sheets.push(sheet);
+    byGroup.get(key).sheets.push(sheet);
   }
 
   let alertsSent = 0;
-  for (const [telegramId, { user, sheets: userSheets }] of byUser) {
+  for (const [groupKey, { group, user, sheets: groupSheets }] of byGroup) {
     try {
       // Har sheet'dagi unsent leadlarni hisoblaymiz
       let pendingCount = 0;
-      for (const sheet of userSheets) {
+      for (const sheet of groupSheets) {
         try {
           const { rows } = await google.readSheetRows(sheet.spreadsheetId);
           await db.updateSheet(sheet.id, { lastPolledAt: new Date() });
@@ -165,40 +167,36 @@ async function awaitingAdminPass(bot) {
 
       if (pendingCount === 0) continue;
 
-      // Throttle: 4 soatda bir marta
-      const acquired = await db.tryClaimNotAdminAlert(telegramId);
-      if (!acquired) {
-        // Avval yuborilgan, hozircha jim turamiz
-        continue;
-      }
+      // Throttle: 4 soatda bir marta (group bo'yicha)
+      const acquired = await db.tryClaimNotAdminAlert(group.id);
+      if (!acquired) continue;
 
-      // Guruh nomini olish (best effort) — chat title'ni Telegram'dan so'raymiz
-      let groupTitle = 'guruh';
+      const copy = messages.forLanguage(user.language);
+      let groupTitle = group.title || copy.groupTitleFallback;
       try {
-        const chat = await bot.telegram.getChat(user.groupId);
+        const chat = await bot.telegram.getChat(group.id);
         if (chat?.title) groupTitle = escapeHtml(chat.title);
       } catch (_) {}
 
       try {
         await bot.telegram.sendMessage(
-          telegramId,
-          messages.notAdminAlert(pendingCount, groupTitle),
+          user.telegramId,
+          copy.notAdminAlert(pendingCount, groupTitle),
           { parse_mode: 'HTML' }
         );
         alertsSent++;
         console.log(
-          `[poller] not-admin alert: user=${telegramId} pending=${pendingCount}`
+          `[poller] not-admin alert: user=${user.telegramId} group=${group.id} pending=${pendingCount}`
         );
       } catch (err) {
         console.error(
-          `[poller] not-admin alert DM yuborilmadi user=${telegramId}:`,
+          `[poller] not-admin alert DM yuborilmadi user=${user.telegramId}:`,
           err.message
         );
-        // Lock'ni qaytarib bermaymiz — keyingi tickda 4s kutib qayta urinamiz
       }
     } catch (err) {
       console.error(
-        `[poller] awaitingAdmin user=${telegramId} xato:`,
+        `[poller] awaitingAdmin group=${groupKey} xato:`,
         err.message
       );
     }
@@ -210,6 +208,9 @@ async function awaitingAdminPass(bot) {
 // Per-sheet processing (admin holatda)
 // ============================================================
 async function processSheet(bot, sheet) {
+  const groupId = sheet.group?.id || sheet.groupId;
+  if (!groupId) return 0;
+
   const { rows } = await google.readSheetRows(sheet.spreadsheetId);
 
   await db.updateSheet(sheet.id, { lastPolledAt: new Date() });
@@ -233,9 +234,9 @@ async function processSheet(bot, sheet) {
       continue;
     }
 
-    const text = formatLeadMessage(row);
+    const text = formatLeadMessage(row, sheet.user?.language);
     try {
-      await bot.telegram.sendMessage(sheet.user.groupId, text, {
+      await bot.telegram.sendMessage(groupId, text, {
         parse_mode: 'HTML',
         disable_web_page_preview: true,
       });
@@ -243,22 +244,22 @@ async function processSheet(bot, sheet) {
       sent++;
     } catch (err) {
       console.error(
-        `[poller] telegram send fail user=${sheet.userTelegramId} group=${sheet.user.groupId}:`,
+        `[poller] telegram send fail sheet=${sheet.id} group=${groupId}:`,
         err.message
       );
       const msg = err.message || '';
 
-      // Admin huquqi yo'q — admin status'ni demote qilamiz
+      // Admin huquqi yo'q — group botIsAdmin=false ga o'tkazamiz
       // (my_chat_member event keladigan vaqtga qadar)
       if (msg.includes('not enough rights') || msg.includes('CHAT_ADMIN_REQUIRED')) {
         console.warn(
-          `[poller] user=${sheet.userTelegramId} botIsAdmin=false ga o'tkazilmoqda (rights yo'q)`
+          `[poller] group=${groupId} botIsAdmin=false ga o'tkazilmoqda (rights yo'q)`
         );
-        await db.updateUser(sheet.userTelegramId, { botIsAdmin: false });
+        await db.updateGroup(groupId, { botIsAdmin: false });
         return sent;
       }
 
-      // Guruh muammosi — group_id ni tozalaymiz
+      // Guruh muammosi — group rowni o'chiramiz (sheet.groupId FK SET NULL)
       if (
         msg.includes('chat not found') ||
         msg.includes('kicked') ||
@@ -266,16 +267,14 @@ async function processSheet(bot, sheet) {
         msg.includes('group chat was upgraded')
       ) {
         console.warn(
-          `[poller] user=${sheet.userTelegramId} guruh muammo, groupId tozalanmoqda`
+          `[poller] group=${groupId} muammo, group o'chirilmoqda`
         );
-        await db.updateUser(sheet.userTelegramId, {
-          groupId: null,
-          botIsAdmin: false,
-        });
+        await db.deleteGroup(groupId);
+        const copy = messages.forLanguage(sheet.user?.language);
         try {
           await bot.telegram.sendMessage(
             sheet.userTelegramId,
-            `⚠️ Telegram guruhga ulana olmadim. Meni guruhdan chiqarib, qaytadan qo'shing va admin qiling. /changegroup`,
+            copy.groupReconnectRequired,
             { parse_mode: 'HTML' }
           );
         } catch (_) {}

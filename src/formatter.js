@@ -17,9 +17,10 @@ const DEFAULT_HIDDEN = new Set([
   'platform',
 ]);
 
-function formatLeadMessage(row) {
+function formatLeadMessage(row, language = 'uz') {
+  const lang = String(language || 'uz').toLowerCase().startsWith('ru') ? 'ru' : 'uz';
   const lines = [];
-  lines.push('📩 <b>Yangi Lead!</b>');
+  lines.push(lang === 'ru' ? '📩 <b>Новый лид</b>' : '📩 <b>Yangi lead</b>');
   lines.push('━━━━━━━━━━━━━━');
 
   const formName = row['form_name'];
@@ -45,10 +46,18 @@ function formatLeadMessage(row) {
   lines.push('━━━━━━━━━━━━━━');
 
   const when = parseDate(createdTime) || new Date();
-  lines.push(`📅 <b>Vaqt:</b> ${escapeHtml(formatTashkentTime(when))}`);
+  lines.push(
+    lang === 'ru'
+      ? `📅 <b>Время:</b> ${escapeHtml(formatTashkentTime(when))}`
+      : `📅 <b>Vaqt:</b> ${escapeHtml(formatTashkentTime(when))}`
+  );
 
   if (formName) {
-    lines.push(`📌 <b>Manba:</b> ${escapeHtml(String(formName).trim())}`);
+    lines.push(
+      lang === 'ru'
+        ? `📌 <b>Источник:</b> ${escapeHtml(String(formName).trim())}`
+        : `📌 <b>Manba:</b> ${escapeHtml(String(formName).trim())}`
+    );
   }
 
   return lines.join('\n');

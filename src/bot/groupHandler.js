@@ -1,22 +1,17 @@
 /**
- * Bot guruhga qo'shilganda / chiqarilganda / admin status o'zgarganda
- * avtomatik aniqlash.
+ * Telegram guruh ulanishi/ajralishi va admin status o'zgarishi.
  *
- * Telegram `my_chat_member` event'lari:
- *   - left/kicked → member/administrator      : QO'SHILDI
- *   - member/administrator → left/kicked      : CHIQARILDI
- *   - member ↔ administrator (in-group)       : ADMIN STATUS O'ZGARDI
- *
- * Qoidalar:
- *   1. Botni faqat profile'i 'ready' va ≥1 verified sheet'i bor user qo'sha oladi.
- *   2. Bitta user — bitta guruh (DB darajasida group_id UNIQUE).
- *   3. Bot guruhdan chiqarilsa — group_id ni tozalaymiz va DM da yangi
- *      guruhga qo'shish bo'yicha yo'riqnoma yuboramiz (changegroup oqimi).
- *   4. Admin status DB da `bot_is_admin` ga saqlanadi. Poller faqat
- *      admin bo'lgan guruhlarga lead jo'natadi.
+ * Yangi mantiq: guruhlar `groups` jadvalida saqlanadi (har user uchun N ta).
+ * Sheet'lar groupga `sheets.group_id` orqali bog'lanadi. Yangi group qo'shilganda,
+ * agar userda "pending group assign" sheet bo'lsa, o'sha sheetga avtomatik
+ * biriktiriladi (onboarding flow ichida `new_group` tugmasi orqali boshlangan).
  */
 
 const messages = require('./messages');
+const keyboards = require('./keyboards');
+const state = require('./state');
+const { inferUserLanguage } = require('./i18n');
+const onboarding = require('./onboarding');
 const db = require('../db');
 
 function register(bot) {
@@ -27,7 +22,6 @@ function register(bot) {
     const oldStatus = update.old_chat_member.status;
     const fromUserId = update.from?.id;
 
-    // Faqat guruhlar
     if (chat.type !== 'group' && chat.type !== 'supergroup') return;
 
     const wasOut = ['left', 'kicked'].includes(oldStatus);
@@ -35,70 +29,70 @@ function register(bot) {
     const wasIn = ['member', 'administrator'].includes(oldStatus);
     const nowOut = ['left', 'kicked'].includes(newStatus);
 
-    // ============================================================
-    // Bot CHIQARILDI: group_id ni tozalash + DM yo'riqnoma
-    // ============================================================
+    // BOT GURUHDAN CHIQARILDI / O'CHIRILDI
     if (wasIn && nowOut) {
-      const owner = await db.getUserByGroupId(chat.id);
-      if (!owner) return;
+      const group = await db.getGroup(chat.id);
+      if (!group) return;
 
-      await db.updateUser(owner.telegramId, {
-        groupId: null,
-        botIsAdmin: false,
-      });
+      const owner = await db.getUser(group.ownerTelegramId);
+      const copy = owner ? getCopy(owner) : messages.forLanguage('uz');
+
+      // Group rowni o'chiramiz — sheetlardagi group_id avtomatik NULL ga tushadi (FK SET NULL)
+      await db.deleteGroup(chat.id);
       console.log(
-        `[group] bot chiqarildi: user=${owner.telegramId} group=${chat.id} unbind`
+        `[group] bot chiqarildi: owner=${group.ownerTelegramId} group=${chat.id} o'chirildi`
       );
 
-      try {
-        await ctx.telegram.sendMessage(
-          owner.telegramId,
-          messages.groupRemovedDm(escapeHtml(chat.title || 'guruh')),
-          { parse_mode: 'HTML' }
-        );
-      } catch (err) {
-        console.error('[group] DM yuborilmadi:', err.message);
-      }
-      return;
-    }
-
-    // ============================================================
-    // ADMIN STATUS O'ZGARDI (in-group, ya'ni member ↔ administrator)
-    // ============================================================
-    if (wasIn && nowIn && oldStatus !== newStatus) {
-      const owner = await db.getUserByGroupId(chat.id);
-      if (!owner) return;
-
-      const becameAdmin = newStatus === 'administrator';
-      await db.updateUser(owner.telegramId, { botIsAdmin: becameAdmin });
-      console.log(
-        `[group] admin status o'zgardi: user=${owner.telegramId} group=${chat.id} botIsAdmin=${becameAdmin}`
-      );
-
-      // Promotion alert throttle key'larini tozalash — endi alert keraksiz
-      try {
-        if (becameAdmin) {
-          await db.clearNotAdminAlert(owner.telegramId);
+      if (owner) {
+        try {
+          await ctx.telegram.sendMessage(
+            owner.telegramId,
+            copy.groupRemovedDm(escapeHtml(chat.title || copy.groupTitleFallback)),
+            { parse_mode: 'HTML' }
+          );
+        } catch (err) {
+          console.error('[group] DM yuborilmadi:', err.message);
         }
-      } catch (_) {}
-
-      try {
-        await ctx.telegram.sendMessage(
-          owner.telegramId,
-          becameAdmin
-            ? messages.botPromoted(escapeHtml(chat.title || 'guruh'))
-            : messages.botDemoted(escapeHtml(chat.title || 'guruh')),
-          { parse_mode: 'HTML' }
-        );
-      } catch (err) {
-        console.error('[group] DM yuborilmadi:', err.message);
       }
       return;
     }
 
-    // ============================================================
-    // Bot QO'SHILDI
-    // ============================================================
+    // ADMIN STATUSI O'ZGARDI (member <-> administrator)
+    if (wasIn && nowIn && oldStatus !== newStatus) {
+      const group = await db.getGroup(chat.id);
+      if (!group) return;
+
+      const owner = await db.getUser(group.ownerTelegramId);
+      const copy = owner ? getCopy(owner) : messages.forLanguage('uz');
+      const becameAdmin = newStatus === 'administrator';
+      await db.updateGroup(chat.id, { botIsAdmin: becameAdmin });
+      console.log(
+        `[group] admin status o'zgardi: group=${chat.id} botIsAdmin=${becameAdmin}`
+      );
+
+      if (becameAdmin) {
+        try {
+          await db.clearNotAdminAlert(chat.id);
+        } catch (_) {}
+      }
+
+      if (owner) {
+        try {
+          await ctx.telegram.sendMessage(
+            owner.telegramId,
+            becameAdmin
+              ? copy.botPromoted(escapeHtml(chat.title || copy.groupTitleFallback))
+              : copy.botDemoted(escapeHtml(chat.title || copy.groupTitleFallback)),
+            { parse_mode: 'HTML' }
+          );
+        } catch (err) {
+          console.error('[group] DM yuborilmadi:', err.message);
+        }
+      }
+      return;
+    }
+
+    // BOT YANGI GURUHGA QO'SHILDI
     if (!(wasOut && nowIn)) return;
 
     if (!fromUserId) {
@@ -117,80 +111,52 @@ function register(bot) {
       return;
     }
 
-    // Profile tayyor emas
+    const copy = getCopy(user);
+
     if (user.status !== 'ready') {
       try {
-        await ctx.telegram.sendMessage(
-          fromUserId,
-          "⚠️ Avval profile'ni tugating va kamida bitta sheet'ni tasdiqlang. /start",
-          { parse_mode: 'HTML' }
-        );
-      } catch (_) {}
-      try {
-        await ctx.telegram.leaveChat(chat.id);
-      } catch (_) {}
-      return;
-    }
-
-    // Hech qanday verified sheet yo'q
-    const verifiedCount = await db.countVerifiedSheets(fromUserId);
-    if (verifiedCount === 0) {
-      try {
-        await ctx.telegram.sendMessage(
-          fromUserId,
-          "⚠️ Avval kamida bitta Google Sheet'ni Facebook Lead Center'ga ulang va tasdiqlang.\n\n/sheets — sheetlar ro'yxati",
-          { parse_mode: 'HTML' }
-        );
-      } catch (_) {}
-      try {
-        await ctx.telegram.leaveChat(chat.id);
-      } catch (_) {}
-      return;
-    }
-
-    // Bitta user = bitta guruh
-    if (user.groupId && String(user.groupId) !== String(chat.id)) {
-      console.warn(
-        `[group] user=${fromUserId} allaqachon group=${user.groupId} ga bog'langan, yangi group=${chat.id} rad etildi`
-      );
-      try {
-        await ctx.telegram.sendMessage(
-          fromUserId,
-          messages.alreadyBoundDm(user.groupId),
-          { parse_mode: 'HTML' }
-        );
-      } catch (_) {}
-      try {
-        await ctx.telegram.sendMessage(chat.id, messages.alreadyBoundGroup, {
+        await ctx.telegram.sendMessage(fromUserId, copy.profileNotReadyForGroup, {
           parse_mode: 'HTML',
         });
       } catch (_) {}
       try {
         await ctx.telegram.leaveChat(chat.id);
-      } catch (err) {
-        console.error('[group] leaveChat xato:', err.message);
-      }
+      } catch (_) {}
       return;
     }
 
-    // Yangi (yoki o'sha) guruhga bog'lanish + admin statusini saqlash
+    // Bu group boshqa userga tegishlimi?
+    const existing = await db.getGroup(chat.id);
+    if (existing && String(existing.ownerTelegramId) !== String(fromUserId)) {
+      console.warn(
+        `[group] guruh allaqachon boshqa userga tegishli: group=${chat.id} owner=${existing.ownerTelegramId}`
+      );
+      try {
+        await ctx.telegram.sendMessage(fromUserId, copy.groupAlreadyClaimed, {
+          parse_mode: 'HTML',
+        });
+      } catch (_) {}
+      try {
+        await ctx.telegram.leaveChat(chat.id);
+      } catch (_) {}
+      return;
+    }
+
     const isAdmin = newStatus === 'administrator';
+    let group;
     try {
-      await db.updateUser(fromUserId, {
-        groupId: chat.id,
+      group = await db.upsertGroup({
+        id: chat.id,
+        ownerTelegramId: fromUserId,
+        title: chat.title || null,
         botIsAdmin: isAdmin,
       });
     } catch (err) {
-      // group_id UNIQUE — boshqa user shu guruhni allaqachon olgan
-      console.error(
-        `[group] group_id saqlashda xato (unique conflict bo'lishi mumkin): ${err.message}`
-      );
+      console.error(`[group] guruh saqlashda xato: ${err.message}`);
       try {
-        await ctx.telegram.sendMessage(
-          fromUserId,
-          "⚠️ Bu guruh allaqachon boshqa foydalanuvchiga bog'langan. Iltimos, boshqa guruh tanlang.",
-          { parse_mode: 'HTML' }
-        );
+        await ctx.telegram.sendMessage(fromUserId, copy.errorGeneric, {
+          parse_mode: 'HTML',
+        });
       } catch (_) {}
       try {
         await ctx.telegram.leaveChat(chat.id);
@@ -202,41 +168,73 @@ function register(bot) {
       `[group] user=${fromUserId} group=${chat.id} (${chat.title}) ulandi, admin=${isAdmin}`
     );
 
-    // Foydalanuvchiga DM
+    // Pending sheet assignment bormi? Bo'lsa darhol bog'laymiz.
+    let assignedSheet = null;
+    try {
+      const pendingSheetId = await onboarding.getPendingGroupAssign(fromUserId);
+      if (pendingSheetId) {
+        const sheet = await db.getSheet(pendingSheetId);
+        if (sheet && String(sheet.userTelegramId) === String(fromUserId)) {
+          await db.updateSheet(sheet.id, { groupId: group.id });
+          await onboarding.clearPendingGroupAssign(fromUserId);
+          assignedSheet = sheet;
+        }
+      }
+    } catch (err) {
+      console.error('[group] pending sheet assign xato:', err.message);
+    }
+
     try {
       await ctx.telegram.sendMessage(
         fromUserId,
-        messages.groupAdded(escapeHtml(chat.title || 'guruh')),
+        copy.groupAdded(escapeHtml(chat.title || copy.groupTitleFallback)),
         { parse_mode: 'HTML' }
       );
     } catch (err) {
       console.error('[group] DM yuborilmadi:', err.message);
     }
 
-    // Guruhga xush kelibsiz (faqat admin bo'lsa — non-admin holatda
-    // bot xabar jo'nata olmasligi mumkin va keraksiz xato beradi)
+    if (assignedSheet) {
+      try {
+        await ctx.telegram.sendMessage(
+          fromUserId,
+          copy.sheetGroupBound(assignedSheet.title, chat.title || copy.groupTitleFallback),
+          { parse_mode: 'HTML' }
+        );
+      } catch (_) {}
+      try {
+        await state.setState(fromUserId, 'main');
+        await ctx.telegram.sendMessage(
+          fromUserId,
+          copy.mainMenuHint,
+          {
+            parse_mode: 'HTML',
+            ...keyboards.mainMenu(user.language),
+          }
+        );
+      } catch (_) {}
+    }
+
     if (isAdmin) {
       try {
         await ctx.telegram.sendMessage(
           chat.id,
-          messages.groupAddedToChat(user.firstName),
+          copy.groupAddedToChat(user.firstName),
           { parse_mode: 'HTML' }
         );
       } catch (err) {
         console.error('[group] guruhga xabar yuborilmadi:', err.message);
       }
     } else {
-      // Admin emas — userga DM da batafsil instruktsiya
       try {
         await ctx.telegram.sendMessage(
           fromUserId,
-          messages.notAdminDm(escapeHtml(chat.title || 'guruh')),
+          copy.notAdminDm(escapeHtml(chat.title || copy.groupTitleFallback)),
           { parse_mode: 'HTML' }
         );
       } catch (_) {}
-      // Guruhga ham (best effort) qisqa eslatma
       try {
-        await ctx.telegram.sendMessage(chat.id, messages.notAdmin, {
+        await ctx.telegram.sendMessage(chat.id, copy.notAdmin, {
           parse_mode: 'HTML',
         });
       } catch (_) {}
@@ -244,8 +242,15 @@ function register(bot) {
   });
 }
 
-function escapeHtml(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function getCopy(user) {
+  return messages.forLanguage(inferUserLanguage(user));
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 module.exports = { register };

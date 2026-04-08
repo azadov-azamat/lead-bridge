@@ -8,7 +8,18 @@
       "Bash(yarn db:migrate:status)",
       "Bash(yarn db:migrate)",
       "Bash(chmod +x /Users/azadov.za/repos/lead-bridge/bin/www)",
-      "Bash(kill 49161)"
+      "Bash(kill 49161)",
+      "Bash(node -c src/db.js)",
+      "Bash(node -c src/db/models/index.js)",
+      "Bash(node -c src/db/models/group.model.js)",
+      "Bash(node -c src/db/models/user.model.js)",
+      "Bash(node -c src/db/models/sheet.model.js)",
+      "Bash(node -c src/bot/groupHandler.js)",
+      "Bash(node -c src/bot/onboarding.js)",
+      "Bash(node -c src/bot/keyboards.js)",
+      "Bash(node -c src/bot/state.js)",
+      "Bash(node -c src/bot/messages.js)",
+      "Bash(node -c src/bot.js)"
     ]
   }
 }

@@ -1,302 +1,435 @@
-/**
- * Foydalanuvchiga ko'rsatiladigan barcha matnlar shu yerda.
- * Tilik: o'zbek.
- *
- * Format konvensiyasi: HTML parse mode (Telegraf `replyWithHTML`).
- */
+const { normalizeLanguage } = require('./i18n');
 
-const SHEET_STATUS_LABEL = {
-  pending_verification: '⏳ FB ulanishi kutilmoqda',
-  verified: '✅ Faol',
-  error: '❌ Xato',
+const SHEET_STATUS_LABELS = {
+  uz: {
+    pending_verification: "⏳ Ulanish tekshirilishi kutilmoqda",
+    verified: '✅ Faol',
+    error: '❌ Xato',
+  },
+  ru: {
+    pending_verification: '⏳ Ждет проверки подключения',
+    verified: '✅ Активен',
+    error: '❌ Ошибка',
+  },
 };
 
-module.exports = {
-  // ============================================================
-  // Onboarding
-  // ============================================================
-
-  welcome: (name) =>
-    `Salom${name ? `, <b>${name}</b>` : ''}! 👋\n\n` +
-    `Men <b>Lead Bridge</b> botiman. Sizning Instagram va Facebook reklamalaringizdan kelgan leadlarni avtomatik ravishda Telegram guruhingizga olib beraman.\n\n` +
-    `Sozlash 4 qadamdan iborat:\n` +
-    `1️⃣ Telefon raqamingizni qoldirish\n` +
-    `2️⃣ Gmail manzilingizni berish\n` +
-    `3️⃣ Facebook Lead Center'ga ulanish\n` +
-    `4️⃣ Meni Telegram guruhga qo'shish\n\n` +
-    `Boshlash uchun pastdagi tugmani bosing.`,
-
-  askPhone:
-    `📱 <b>1-qadam: Telefon raqamingiz</b>\n\n` +
-    `Sizni tanib olishimiz uchun telefon raqamingizni yuboring.\n\n` +
-    `Pastdagi <b>"📱 Raqamni yuborish"</b> tugmasini bosing.`,
-
-  phoneSaved: (phone) =>
-    `✅ Raqam saqlandi: <code>${phone}</code>\n\n` +
-    `Endi keyingi qadamga o'tamiz.`,
-
-  askGmail:
-    `📧 <b>2-qadam: Gmail manzilingiz</b>\n\n` +
-    `Men sizga Google Sheet tayyorlab beraman va shu sheet'ni sizning Gmail manzilingizga ulashaman.\n\n` +
-    `Iltimos, <b>Gmail manzilingizni</b> yuboring (masalan: <code>siz@gmail.com</code>).\n\n` +
-    `⚠️ Bu manzil siz Facebook'da ishlatadigan Google akkountingiz bilan bir xil bo'lishi muhim — chunki Facebook Lead Center shu akkountga ulanadi.`,
-
-  invalidGmail:
-    `❌ Bu Gmail manzilga o'xshamayapti. Iltimos, to'g'ri formatda yuboring: <code>siz@gmail.com</code>`,
-
-  creatingSheet: `⏳ Google Sheet yaratilyapti...`,
-
-  /**
-   * Sheet yaratilgandan keyin (birinchi yoki /newsheet orqali).
-   * sheetUrl — Google sheet URL.
-   * isFirst — birinchi sheetmi (onboarding) yoki qo'shimchami.
-   */
-  sheetCreated: (sheetUrl, isFirst = true) =>
-    (isFirst
-      ? `✅ <b>Sheet tayyor!</b>\n\n`
-      : `✅ <b>Yangi sheet yaratildi!</b>\n\n`) +
-    `🔗 <a href="${sheetUrl}">Google Sheet'ni ochish</a>\n\n` +
-    `Sheet sizning Gmail manzilingizga ulashildi — Google Drive'da topishingiz mumkin.\n\n` +
-    `━━━━━━━━━━━━━━\n` +
-    `📘 <b>Facebook Lead Center'ga ulang</b>\n\n` +
-    `1. <a href="https://business.facebook.com/latest/leads_center">Meta Business Suite → Lead Center</a>'ni oching\n` +
-    `2. Chap menyudan <b>"Integrations"</b> ni tanlang\n` +
-    `3. <b>"Google Sheets"</b> integratsiyasini toping va <b>"Connect"</b> bosing\n` +
-    `4. Forma(lar)ni tanlang va yuqoridagi sheet linkini joylang\n` +
-    `5. Google akkountingiz orqali ruxsat bering\n` +
-    `6. Tayyor bo'lgach, pastdagi <b>"✅ Ulandim"</b> tugmasini bosing\n\n` +
-    `💡 Yo'riqnoma: <a href="https://www.facebook.com/business/help/447834325474833">Facebook rasmiy hujjati</a>`,
-
-  verifying: `⏳ Sheet'ni tekshiryapman...`,
-
-  /**
-   * Sheet muvaffaqiyatli verifikatsiya qilingandan keyin.
-   * needsGroup — true bo'lsa, hali guruh ulanmagan (birinchi marta).
-   */
-  sheetVerifiedSuccess: (needsGroup) =>
-    `✅ <b>Sheet tasdiqlandi!</b>\n\n` +
-    `Facebook Lead Center ustunlari topildi. Ushbu sheet'dan kelgan leadlar avtomatik guruhga jo'natiladi.\n\n` +
-    (needsGroup
-      ? `━━━━━━━━━━━━━━\n` +
-        `👥 <b>Keyingi qadam: Meni guruhga qo'shing</b>\n\n` +
-        `Endi men leadlarni qaysi guruhga jo'natishimni bilishim kerak.\n\n` +
-        `1. O'zingizning Telegram guruhingizni oching (yoki yangi yarating)\n` +
-        `2. Guruh sozlamalari → <b>"Add members"</b>\n` +
-        `3. Meni qidiring va qo'shing\n` +
-        `4. <b>MUHIM:</b> Meni <b>admin</b> qilib belgilang (xabar jo'natish uchun kerak)\n\n` +
-        `Men o'zim qachon qo'shilganimni va qaysi guruh ekanligini bilaman. ✨`
-      : `Siz endi /sheets orqali barcha sheetlaringizni ko'rishingiz va /newsheet orqali yangisini qo'shishingiz mumkin.`),
-
-  sheetVerifyFail: (missing) =>
-    `❌ <b>Hali ulanish topilmadi</b>\n\n` +
-    `Sheet'da Facebook ustunlari topilmadi:\n` +
-    `<code>${missing.join(', ')}</code>\n\n` +
-    `Iltimos, quyidagilarni tekshiring:\n` +
-    `• Facebook Lead Center'da Google Sheets integratsiyasi yoqilgan\n` +
-    `• To'g'ri sheet linki ulangan\n` +
-    `• Ulangan akkount uchun ruxsat berilgan\n\n` +
-    `Tayyor bo'lganda yana <b>"✅ Ulandim"</b> tugmasini bosing.\n\n` +
-    `💡 Maslahat: Facebook'da <b>"Lead Ads Testing Tool"</b> orqali bitta sinov leadi jo'nating — shunda Facebook headerlarni avtomatik yaratadi.`,
-
-  // ============================================================
-  // Group binding
-  // ============================================================
-
-  groupAdded: (groupTitle) =>
-    `🎉 <b>Tabriklayman! Hammasi tayyor.</b>\n\n` +
-    `Men <b>"${groupTitle}"</b> guruhiga qo'shildim va u yerga leadlarni jo'natishni boshlayman.\n\n` +
-    `📊 Endi har 1 daqiqada yangi leadlar Sheet(lar)ingizdan o'qiladi va guruhga keladi.\n\n` +
-    `Foydali komandalar:\n` +
-    `• /status — joriy holat\n` +
-    `• /sheets — barcha sheetlaringiz\n` +
-    `• /newsheet — yana bitta sheet qo'shish\n` +
-    `• /changegroup — guruhni o'zgartirish`,
-
-  groupAddedToChat: (firstName) =>
-    `👋 Salom! Men <b>Lead Bridge</b> botiman.\n\n` +
-    `${firstName ? `<b>${firstName}</b>` : 'Egam'} meni shu guruhga ulash uchun qo'shdi. Endi yangi Facebook/Instagram leadlar shu yerga avtomatik kelib turadi.\n\n` +
-    `✅ Sozlash tugadi.`,
-
-  notAdmin:
-    `⚠️ Men <b>admin</b> emasman shu guruhda.\n\n` +
-    `Iltimos, sozlamalardan meni admin qilib belgilang — aks holda xabar jo'nata olmayman.`,
-
-  /**
-   * Bot guruhga qo'shildi, lekin admin emas — userga DM da batafsil instruktsiya.
-   */
-  notAdminDm: (groupTitle) =>
-    `⚠️ Men <b>${groupTitle}</b> guruhiga qo'shildim, lekin <b>admin</b> emasman.\n\n` +
-    `Xavfsizlik uchun men admin bo'lmaguncha leadlarni guruhga jo'natmayman.\n\n` +
-    `<b>Meni qanday admin qilish:</b>\n` +
-    `1. Guruh sozlamalarini oching\n` +
-    `2. <b>"Administrators"</b> bo'limiga kiring\n` +
-    `3. <b>"Add Administrator"</b> bosing\n` +
-    `4. Mening profilimni tanlang\n` +
-    `5. Saqlang\n\n` +
-    `Tayyor bo'lganingizdan so'ng leadlar avtomatik yetib kela boshlaydi. ✨`,
-
-  /**
-   * Yangi leadlar bor, lekin bot hali admin emas — throttled alert (DM).
-   * count — kutilayotgan unsent leadlar soni.
-   */
-  notAdminAlert: (count, groupTitle) =>
-    `🔔 <b>Yangi ${count} ta lead keldi!</b>\n\n` +
-    `Lekin men <b>${groupTitle}</b> guruhida hali admin emasman, shuning uchun ularni sizga jo'nata olmayapman.\n\n` +
-    `<b>Leadlarni ko'rish uchun meni admin qiling</b>\n` +
-    
-    `Admin bo'lganimdan so'ng to'plangan barcha leadlarni darhol jo'nataman. 📨`,
-
-  /**
-   * Bot admin qilindi (member → administrator).
-   */
-  botPromoted: (groupTitle) =>
-    `✅ <b>Rahmat!</b> Endi men <b>${groupTitle}</b> guruhida adminman.\n\n` +
-    `Yangi leadlar avtomatik kelib turadi. Agar to'plangan leadlar bo'lsa, hozir jo'nataman. 📨`,
-
-  /**
-   * Bot admin huquqidan mahrum qilindi (administrator → member).
-   */
-  botDemoted: (groupTitle) =>
-    `⚠️ Men <b>${groupTitle}</b> guruhida admin huquqidan mahrum qilindim.\n\n` +
-    `Endi leadlarni guruhga jo'nata olmayman. Iltimos, meni qaytadan admin qiling — aks holda yangi leadlar to'planib qoladi.`,
-
-  /**
-   * User boshqa guruhga botni qo'shganda (allaqachon bog'langan).
-   */
-  alreadyBoundDm: (oldGroupId) =>
-    `⚠️ <b>Siz allaqachon boshqa guruhga bog'langansiz.</b>\n\n` +
-    `Joriy guruh ID: <code>${oldGroupId}</code>\n\n` +
-    `Bitta foydalanuvchi faqat bitta guruhga ulanishi mumkin. Yangi guruhga o'tish uchun:\n` +
-    `• /changegroup buyrug'ini bosing yoki\n` +
-    `• Eski guruhdan meni chiqarib, yangisiga qo'shing.`,
-
-  alreadyBoundGroup:
-    `⚠️ Bu foydalanuvchi allaqachon boshqa guruhga bog'langan.\n\n` +
-    `Bitta foydalanuvchi faqat bitta guruhga ulana oladi. Men bu guruhni tark etaman.`,
-
-  /**
-   * /changegroup bosilganda — yo'riqnoma.
-   */
-  changeGroupInstructions: (oldGroupId) =>
-    `🔄 <b>Guruhni o'zgartirish</b>\n\n` +
-    `Joriy guruh ID: <code>${oldGroupId}</code>\n\n` +
-    `Yangi guruhga o'tish uchun:\n` +
-    `1. <b>Avval meni eski guruhdan chiqaring</b> (Remove from group)\n` +
-    `2. Men sizga DM da yangi guruhga qo'shish bo'yicha yo'riqnoma yuboraman\n` +
-    `3. Yangi guruhga meni qo'shing va admin qiling\n\n` +
-    `⚠️ Bot eski guruhdan chiqmaguncha yangisiga ulay olmayman.`,
-
-  changeGroupNoCurrent:
-    `ℹ️ Sizda hozirda hech qanday guruh ulanmagan. Guruhga qo'shish uchun:\n\n` +
-    `1. O'zingizning Telegram guruhingizni oching\n` +
-    `2. Sozlamalar → <b>"Add members"</b>\n` +
-    `3. Meni qidiring va qo'shing (admin qilib)`,
-
-  /**
-   * Bot guruhdan chiqarilganda — DM da yangi guruhga qo'shish bo'yicha xabar.
-   */
-  groupRemovedDm: (oldTitle) =>
-    `ℹ️ Men <b>${oldTitle}</b> guruhidan chiqarildim.\n\n` +
-    `Endi yangi guruhga qo'shishingiz mumkin:\n\n` +
-    `1. O'zingizning Telegram guruhingizni oching (yoki yangi yarating)\n` +
-    `2. Sozlamalar → <b>"Add members"</b>\n` +
-    `3. Meni qidiring va qo'shing\n` +
-    `4. <b>MUHIM:</b> Meni <b>admin</b> qilib belgilang\n\n` +
-    `Yangi guruhga qo'shilganimni o'zim aniqlayman. ✨`,
-
-  // ============================================================
-  // Sheet management
-  // ============================================================
-
-  newSheetNotReady:
-    `⚠️ Avval profile sozlashni tugating. /start bosing.`,
-
-  newSheetCreating: `⏳ Yangi Google Sheet yaratilyapti...`,
-
-  /**
-   * /sheets ro'yxati. sheets — db.listUserSheets natijasi.
-   */
-  sheetsList: (sheets) => {
-    if (sheets.length === 0) {
-      return (
-        `📭 Sizda hech qanday sheet yo'q.\n\n` +
-        `Yangi sheet yaratish uchun /newsheet bosing.`
-      );
-    }
-    const lines = [`📑 <b>Sizning sheetlaringiz (${sheets.length}):</b>\n`];
-    sheets.forEach((s, i) => {
-      const label = SHEET_STATUS_LABEL[s.status] || s.status;
-      const title = s.title ? ` — ${escape(s.title)}` : '';
-      lines.push(
-        `${i + 1}. <a href="${s.spreadsheetUrl}">Sheet</a>${title}\n   ${label}`
-      );
-      if (s.status === 'pending_verification') {
-        lines.push(`   ↪︎ /verify_${s.id} — FB ulanishini tekshirish`);
-      }
-      if (s.status === 'error' && s.errorReason) {
-        lines.push(`   ↪︎ Xato: <code>${escape(s.errorReason)}</code>`);
-      }
-    });
-    return lines.join('\n');
+const COPY = {
+  uz: {
+    welcome: (name) =>
+      `👋 Salom${name ? `, <b>${escape(name)}</b>` : ''}!\n\n` +
+      `🤖 Men <b>Lead Bridge</b> botiman. Facebook va Instagram reklamalaridan tushgan leadlarni yig'ib, kerakli Telegram guruhingizga tartibli qilib olib boraman.\n\n` +
+      `🛠 Sozlash juda oson:\n` +
+      `1️⃣ 📱 Telefon raqamingizni yuborasiz\n` +
+      `2️⃣ 📧 Gmail manzilingizni tanlaysiz\n` +
+      `3️⃣ 📊 Men sizga sheet tayyorlab beraman\n` +
+      `4️⃣ 💬 Botni guruhga qo'shasiz\n\n` +
+      `🚀 Hammasi tayyor bo'lsa, leadlar guruhga o'z vaqtida tushib turadi.`,
+    mainMenuHint:
+      `🏠 Asosiy menyu. Pastdagi tugmalardan foydalaning:\n\n` +
+      `📋 <b>Sheetlarim</b> — sheetlar ro'yxati va statusi\n` +
+      `🆕 <b>Yangi sheet</b> — yangi sheet qo'shish\n` +
+      `⚙️ <b>Sozlamalar</b> — til, holat, yordam`,
+    settingsMenuHint:
+      `⚙️ Sozlamalar.\n\n` +
+      `🌐 <b>Til</b> — interfeys tilini tanlash\n` +
+      `📊 <b>Holatim</b> — joriy holatingiz\n` +
+      `❓ <b>Yordam</b> — qo'llab-quvvatlash`,
+    languageMenuHint:
+      `🌐 Tilni tanlang. Pastdagi tugmalardan birini bosing.`,
+    backToMain: `🏠 Asosiy menyuga qaytdik.`,
+    backToSettings: `⚙️ Sozlamalarga qaytdik.`,
+    cancelled: `❌ Bekor qilindi.`,
+    askPhone:
+      `📱 Telefon raqamingizni yuboring.\n\n` +
+      `Pastdagi tugma orqali yuborsangiz, profilingizni to'g'ri bog'lab, keyingi qadamga o'tamiz. ➡️`,
+    phoneSaved: (phone) =>
+      `✅ Zo'r, raqam saqlandi: <code>${escape(phone)}</code>\n\n` +
+      `📧 Endi Gmail manzilingizni tanlaymiz.`,
+    askGmail:
+      `📧 Gmail manzilingizni yuboring.\n\n` +
+      `📊 Men Google Sheet tayyorlab, uni shu manzil bilan ulab beraman.\n\n` +
+      `Masalan: <code>siz@gmail.com</code>`,
+    askGmailWithPicker:
+      `📧 Yangi sheet uchun qaysi Gmail akkountdan foydalanamiz?\n\n` +
+      `👇 Pastdagi tugmalardan birini tanlang yoki <b>✍️ Yangi gmail</b> ni bosib, yangi manzilni xabarda yozing.\n\n` +
+      `Format: <code>siz@gmail.com</code>`,
+    typeNewGmail:
+      `✍️ Yangi Gmail manzilni xabar qilib yuboring.\n\n` +
+      `Format: <code>siz@gmail.com</code>`,
+    askGroupForSheet: (sheetTitle) =>
+      `Sheet <b>${escape(sheetTitle || '')}</b> tayyor.\n\n` +
+      `Endi shu sheet leadlari qaysi guruhga tushishini tanlang. Eski guruhlaringizdan birini tanlasangiz ham bo'ladi, yoki yangi guruh ochib menga qo'shasiz.`,
+    askGroupNoExisting: (sheetTitle) =>
+      `Sheet <b>${escape(sheetTitle || '')}</b> tayyor.\n\n` +
+      `Endi leadlar uchun guruh kerak. Yangi guruh oching va meni admin qilib qo'shing.`,
+    newGroupInstructions: (sheetTitle) =>
+      `Yangi guruh yarating va meni shu guruhga qo'shing, keyin admin qiling.\n\n` +
+      `Men sizni kutib turaman — guruh qo'shilishi bilan <b>${escape(sheetTitle || '')}</b> sheet'iga avtomatik bog'layman.`,
+    sheetGroupBound: (sheetTitle, groupTitle) =>
+      `Sheet <b>${escape(sheetTitle || '')}</b> endi <b>${escape(groupTitle || '')}</b> guruhiga bog'landi.\n\n` +
+      `Yangi leadlar shu guruhga tushadi.`,
+    invalidGmail:
+      `Bu Gmail manzilga o'xshamadi. Iltimos, <code>siz@gmail.com</code> ko'rinishida yuboring.`,
+    creatingSheet: `Sheet tayyorlab beryapman, biroz kuting...`,
+    newSheetCreating: `Yangi sheet tayyorlayapman, hozir bo'ladi...`,
+    sheetCreated: (sheetUrl, isFirst = true) =>
+      (isFirst
+        ? `Sheet tayyor bo'ldi.\n\n`
+        : `Yangi sheet tayyor.\n\n`) +
+      `🔗 <a href="${sheetUrl}">Sheet'ni ochish</a>\n\n` +
+      `Endi uni Facebook Lead Center bilan ulang:\n` +
+      `1. <a href="https://business.facebook.com/latest/leads_center">Lead Center</a> ni oching\n` +
+      `2. <b>Integrations</b> bo'limiga kiring\n` +
+      `3. <b>Google Sheets</b> ni ulang\n` +
+      `4. Shu sheet'ni tanlang\n` +
+      `5. Hammasi ulanganidan keyin pastdagi tugmani bosing\n\n` +
+      `Kerak bo'lsa rasmiy yo'riqnoma ham shu yerda: <a href="https://www.facebook.com/business/help/447834325474833">Facebook help</a>`,
+    verifying: `Ulanishni tekshirib ko'ryapman...`,
+    sheetVerifiedSuccess: (needsGroup) =>
+      `Ajoyib, sheet ulandi.\n\n` +
+      `Endi leadlar shu sheet orqali olinadi.\n\n` +
+      (needsGroup
+        ? `Keyingi qadam: meni guruhga qo'shing va admin qiling. Shunda yangi leadlar to'g'ridan-to'g'ri o'sha guruhga tushadi.`
+        : `Hammasi joyida. /sheets orqali sheetlaringizni ko'rishingiz yoki /newsheet bilan yangisini qo'shishingiz mumkin.`),
+    sheetVerifyFail: (missing) =>
+      `Hali Facebook ustunlari topilmadi.\n\n` +
+      `Topilmagan ustunlar:\n<code>${escape(missing.join(', '))}</code>\n\n` +
+      `Lead Center'dagi ulanishni tekshirib, keyin yana urinib ko'ring.`,
+    groupAdded: (groupTitle) =>
+      `Zo'r, endi ishga tushdik.\n\n` +
+      `Men <b>${groupTitle}</b> guruhiga ulanib oldim. Yangi leadlar shu yerga yuboriladi.`,
+    groupAddedToChat: (firstName) =>
+      `Salom, men <b>Lead Bridge</b>.\n\n` +
+      `${firstName ? `<b>${escape(firstName)}</b>` : 'Egasi'} meni shu guruhga leadlarni yig'ish uchun qo'shdi. Endi yangi murojaatlar shu yerga kelib turadi.`,
+    notAdmin:
+      `Salom. Men hali bu guruhda admin emasman.\n\n` +
+      `Menga xabar yuborish huquqini yoqsangiz, ishni davom ettiraman.`,
+    notAdminDm: (groupTitle) =>
+      `Men <b>${groupTitle}</b> guruhiga qo'shildim, lekin hali admin emasman.\n\n` +
+      `Meni admin qilsangiz, leadlar shu zahoti guruhga bora boshlaydi.`,
+    notAdminAlert: (count, groupTitle) =>
+      `${count} ta yangi lead kutyapti.\n\n` +
+      `Lekin men <b>${groupTitle}</b> guruhida admin emasman. Meni admin qilsangiz, yig'ilib qolgan leadlarning hammasini yuboraman.`,
+    botPromoted: (groupTitle) =>
+      `Rahmat, endi men <b>${groupTitle}</b> guruhida adminman.\n\n` +
+      `Yangi leadlar odatdagidek kelib turadi.`,
+    botDemoted: (groupTitle) =>
+      `Meni <b>${groupTitle}</b> guruhida adminlikdan olishibdi.\n\n` +
+      `Shu sabab leadlarni yubora olmayman. Qayta admin qilsangiz, davom etaman.`,
+    alreadyBoundDm: (oldGroupId) =>
+      `Sizda allaqachon ulangan guruh bor.\n\n` +
+      `Joriy guruh ID: <code>${escape(oldGroupId)}</code>\n\n` +
+      `Avval /changegroup orqali eski guruhni bo'shatib olaylik.`,
+    alreadyBoundGroup:
+      `Bu akkaunt allaqachon boshqa guruhga ulangan. Men bu yerdan chiqaman.`,
+    changeGroupInstructions: (oldGroupId) =>
+      `Guruhni almashtirish uchun avval eski guruhdan meni chiqarib yuboring.\n\n` +
+      `Joriy guruh ID: <code>${escape(oldGroupId)}</code>\n\n` +
+      `Shundan keyin meni yangi guruhga qo'shib, admin qilsangiz bo'ladi.`,
+    changeGroupNoCurrent:
+      `Hozircha sizda ulangan guruh yo'q.\n\n` +
+      `Meni kerakli guruhga qo'shing va admin qiling.`,
+    groupRemovedDm: (oldTitle) =>
+      `Men <b>${oldTitle}</b> guruhidan chiqarildim.\n\n` +
+      `Yangi guruhga ulashmoqchi bo'lsangiz, meni o'sha guruhga qo'shing va admin qiling.`,
+    newSheetNotReady:
+      `Avval boshlang'ich sozlashni tugataylik. /start ni bosing.`,
+    sheetsEmpty:
+      `Sizda hali sheet yo'q.\n\n` +
+      `Yangi sheet kerak bo'lsa, /newsheet ni bosing.`,
+    sheetsTitle: (count) => `Sizning sheetlaringiz: <b>${count}</b> ta\n`,
+    verifyHint: (sheetId) => `/verify_${sheetId} — ulanishni tekshirish`,
+    sheetError: (errorReason) => `Xato: <code>${escape(errorReason)}</code>`,
+    sheetNotFound: `Bu sheet topilmadi yoki sizga tegishli emas.`,
+    statusTitle: `Sizning holatingiz\n`,
+    statusName: (value) => `👤 <b>Ism:</b> ${value || '—'}`,
+    statusPhone: (value) => `📱 <b>Telefon:</b> ${value || '—'}`,
+    statusGmail: (value) => `📧 <b>Gmail:</b> ${value || '—'}`,
+    statusGroup: (value) => `💬 <b>Guruh ID:</b> ${value || '—'}`,
+    statusLanguage: `🌐 <b>Til:</b> O'zbekcha`,
+    statusMentions: (count) => `📣 <b>Story mention:</b> ${count} ta`,
+    statusSheets: (all, verified, pending, errored) =>
+      `📑 <b>Sheetlar:</b> ${all} ta (✅ ${verified} · ⏳ ${pending} · ❌ ${errored})`,
+    statusActive: `Ishlayapti, hammasi joyida.`,
+    statusProfilePending: (status) => `Profil hali yakunlanmagan: <code>${escape(status)}</code>`,
+    statusNeedVerifiedSheet: `Hali tasdiqlangan sheet yo'q. /sheets ni ko'ring.`,
+    statusNeedGroup: `Guruh ulanmagan. Meni guruhga qo'shing.`,
+    help:
+      `Yordam kerak bo'lsa, <a href="https://t.me/azadov_azamat">@azadov_azamat</a> bilan bog'laning.`,
+    errorGeneric: `⚠️ Bir oz xatolik bo'ldi. Iltimos, qaytadan urinib ko'ring. 🔄`,
+    notStarted: `Avval /start ni bosing.`,
+    sendOwnContact: `Iltimos, aynan o'zingizning raqamingizni yuboring.`,
+    chooseLanguage: `Tilni tanlang. Men keyingi xabarlarni shu tilda yuboraman.`,
+    languageChanged: `Bo'ldi, endi shu tilda davom etaman.`,
+    sheetCreateError: (errorMessage) =>
+      `Sheet yaratishda muammo bo'ldi:\n<code>${escape(errorMessage)}</code>\n\nYana urinib ko'rish uchun /newsheet ni bosing.`,
+    sheetIssue: (sheetUrl, errorMessage) =>
+      `Sheet bilan bog'liq muammo chiqdi: <a href="${sheetUrl}">ochish</a>\n<code>${escape(errorMessage)}</code>\n\n/sheets orqali holatini ko'rishingiz mumkin.`,
+    groupReconnectRequired:
+      `Telegram guruh bilan aloqa uzildi. Meni guruhdan chiqarib, qayta qo'shing va admin qiling. /changegroup`,
+    profileNotReadyForGroup:
+      `Avval profilingizni tugatib, kamida bitta sheet'ni tasdiqlab oling. /start`,
+    needVerifiedSheetForGroup:
+      `Avval kamida bitta sheet'ni Facebook Lead Center bilan ulab tasdiqlang.\n\n/sheets — ro'yxat`,
+    groupAlreadyClaimed:
+      `Bu guruh allaqachon boshqa foydalanuvchiga ulangan. Iltimos, boshqa guruh tanlang.`,
+    groupTitleFallback: 'guruh',
+    storyMentionReplies: [
+      (count) =>
+        `Rahmat, story'da eslatib o'tganingiz juda yoqimli bo'ldi.\n\nBu sizning <b>${count}</b>-marta mention qilishingiz.`,
+      (count) =>
+        `Katta rahmat. Story'dagi e'tibor uchun minnatdormiz.\n\nHozirgacha siz bizni <b>${count}</b> marta mention qildingiz.`,
+      (count) =>
+        `Rahmat, bu mention biz uchun juda qadrli.\n\nStory mentionlar soni: <b>${count}</b>.`,
+      (count) =>
+        `Yaxshi gap va ishonch uchun rahmat.\n\nSizning mentionlaringiz soni allaqachon <b>${count}</b> taga yetdi.`,
+    ],
   },
-
-  sheetNotFound: `❌ Sheet topilmadi yoki sizga tegishli emas.`,
-
-  // ============================================================
-  // Status & utility
-  // ============================================================
-
-  /**
-   * /status — foydalanuvchi holati.
-   * userInfo: { user, sheets, isActive }
-   */
-  status: ({ user, sheets, isActive }) => {
-    const lines = [`📊 <b>Sizning holatingiz</b>\n`];
-    lines.push(`👤 <b>Ism:</b> ${user.firstName || '—'}`);
-    lines.push(`📱 <b>Telefon:</b> ${user.phone || '—'}`);
-    lines.push(`📧 <b>Gmail:</b> ${user.gmail || '—'}`);
-    lines.push(`💬 <b>Guruh ID:</b> ${user.groupId || '—'}`);
-
-    const verified = sheets.filter((s) => s.status === 'verified').length;
-    const pending = sheets.filter((s) => s.status === 'pending_verification').length;
-    const errored = sheets.filter((s) => s.status === 'error').length;
-    lines.push(
-      `📑 <b>Sheetlar:</b> ${sheets.length} ta (✅ ${verified} · ⏳ ${pending} · ❌ ${errored})`
-    );
-
-    lines.push('');
-    if (isActive) {
-      lines.push(`✅ <b>Tizim faol.</b>`);
-    } else if (user.status !== 'ready') {
-      lines.push(`⏳ Profile sozlanmoqda: <code>${user.status}</code>`);
-    } else if (verified === 0) {
-      lines.push(`⚠️ Hech qanday verified sheet yo'q. /sheets bosing.`);
-    } else if (!user.groupId) {
-      lines.push(`⚠️ Guruh ulanmagan. Meni guruhga qo'shing.`);
-    }
-    return lines.join('\n');
+  ru: {
+    welcome: (name) =>
+      `👋 Здравствуйте${name ? `, <b>${escape(name)}</b>` : ''}!\n\n` +
+      `🤖 Я <b>Lead Bridge</b>. Помогаю аккуратно собирать лиды из рекламы Facebook и Instagram и отправлять их в нужную Telegram-группу.\n\n` +
+      `🛠 Настройка короткая:\n` +
+      `1️⃣ 📱 Отправьте номер телефона\n` +
+      `2️⃣ 📧 Выберите Gmail\n` +
+      `3️⃣ 📊 Я подготовлю для вас sheet\n` +
+      `4️⃣ 💬 Добавьте бота в группу\n\n` +
+      `🚀 После этого новые лиды будут приходить в группу автоматически.`,
+    mainMenuHint:
+      `🏠 Главное меню. Используйте кнопки ниже:\n\n` +
+      `📋 <b>Мои sheet</b> — список и статусы\n` +
+      `🆕 <b>Новый sheet</b> — добавить новый sheet\n` +
+      `⚙️ <b>Настройки</b> — язык, статус, помощь`,
+    settingsMenuHint:
+      `⚙️ Настройки.\n\n` +
+      `🌐 <b>Язык</b> — выбор языка интерфейса\n` +
+      `📊 <b>Мой статус</b> — текущее состояние\n` +
+      `❓ <b>Помощь</b> — поддержка`,
+    languageMenuHint:
+      `🌐 Выберите язык. Нажмите одну из кнопок ниже.`,
+    backToMain: `🏠 Вернулись в главное меню.`,
+    backToSettings: `⚙️ Вернулись в настройки.`,
+    cancelled: `❌ Отменено.`,
+    askPhone:
+      `📱 Отправьте ваш номер телефона.\n\n` +
+      `Используйте кнопку ниже, чтобы я правильно привязал профиль и перешёл к следующему шагу. ➡️`,
+    phoneSaved: (phone) =>
+      `✅ Отлично, номер сохранил: <code>${escape(phone)}</code>\n\n` +
+      `📧 Теперь выберем Gmail.`,
+    askGmail:
+      `📧 Отправьте ваш Gmail.\n\n` +
+      `📊 Я подготовлю Google Sheet и открою к нему доступ на этот адрес.\n\n` +
+      `Например: <code>you@gmail.com</code>`,
+    askGmailWithPicker:
+      `📧 Какой Gmail использовать для нового sheet?\n\n` +
+      `👇 Выберите один из ваших прошлых аккаунтов или нажмите <b>✍️ Новый Gmail</b> и отправьте новый адрес сообщением.\n\n` +
+      `Формат: <code>you@gmail.com</code>`,
+    typeNewGmail:
+      `✍️ Отправьте новый Gmail адрес сообщением.\n\n` +
+      `Формат: <code>you@gmail.com</code>`,
+    askGroupForSheet: (sheetTitle) =>
+      `Sheet <b>${escape(sheetTitle || '')}</b> готов.\n\n` +
+      `Теперь выберите, в какую группу будут приходить лиды этого sheet. Можно взять одну из ваших прошлых групп или создать новую и добавить меня туда.`,
+    askGroupNoExisting: (sheetTitle) =>
+      `Sheet <b>${escape(sheetTitle || '')}</b> готов.\n\n` +
+      `Теперь нужна группа для лидов. Создайте новую группу и добавьте меня туда администратором.`,
+    newGroupInstructions: (sheetTitle) =>
+      `Создайте новую группу и добавьте меня в нее, затем выдайте права администратора.\n\n` +
+      `Я подожду — как только меня добавят, автоматически привяжу группу к sheet'у <b>${escape(sheetTitle || '')}</b>.`,
+    sheetGroupBound: (sheetTitle, groupTitle) =>
+      `Sheet <b>${escape(sheetTitle || '')}</b> теперь привязан к группе <b>${escape(groupTitle || '')}</b>.\n\n` +
+      `Новые лиды будут приходить туда.`,
+    invalidGmail:
+      `Похоже, это не Gmail. Отправьте адрес в формате <code>you@gmail.com</code>.`,
+    creatingSheet: `Готовлю sheet, это займет совсем немного времени...`,
+    newSheetCreating: `Создаю новый sheet, минутку...`,
+    sheetCreated: (sheetUrl, isFirst = true) =>
+      (isFirst
+        ? `Sheet готов.\n\n`
+        : `Новый sheet готов.\n\n`) +
+      `🔗 <a href="${sheetUrl}">Открыть sheet</a>\n\n` +
+      `Теперь подключите его в Facebook Lead Center:\n` +
+      `1. Откройте <a href="https://business.facebook.com/latest/leads_center">Lead Center</a>\n` +
+      `2. Зайдите в раздел <b>Integrations</b>\n` +
+      `3. Подключите <b>Google Sheets</b>\n` +
+      `4. Выберите этот sheet\n` +
+      `5. После подключения нажмите кнопку ниже\n\n` +
+      `Если понадобится, вот официальная инструкция: <a href="https://www.facebook.com/business/help/447834325474833">Facebook help</a>`,
+    verifying: `Проверяю подключение...`,
+    sheetVerifiedSuccess: (needsGroup) =>
+      `Отлично, sheet подключен.\n\n` +
+      `Теперь лиды будут приходить через него.\n\n` +
+      (needsGroup
+        ? `Следующий шаг: добавьте меня в группу и выдайте права администратора. Тогда новые лиды будут сразу приходить туда.`
+        : `Все в порядке. Через /sheets можно посмотреть ваши sheet'ы, а через /newsheet добавить новый.`),
+    sheetVerifyFail: (missing) =>
+      `Пока не вижу обязательные поля Facebook.\n\n` +
+      `Не найдены столбцы:\n<code>${escape(missing.join(', '))}</code>\n\n` +
+      `Проверьте подключение в Lead Center и попробуйте еще раз.`,
+    groupAdded: (groupTitle) =>
+      `Отлично, все подключено.\n\n` +
+      `Я уже в группе <b>${groupTitle}</b>. Новые лиды буду отправлять именно туда.`,
+    groupAddedToChat: (firstName) =>
+      `Салом, я <b>Lead Bridge</b>.\n\n` +
+      `${firstName ? `<b>${escape(firstName)}</b>` : 'Владелец'} добавил меня в эту группу, чтобы новые лиды приходили сюда автоматически.`,
+    notAdmin:
+      `Салом. У меня пока нет прав администратора в этой группе.\n\n` +
+      `Дайте мне право отправлять сообщения, и я продолжу работу.`,
+    notAdminDm: (groupTitle) =>
+      `Я уже добавлен в группу <b>${groupTitle}</b>, но пока не администратор.\n\n` +
+      `Как только выдадите права администратора, начну отправлять лиды в группу.`,
+    notAdminAlert: (count, groupTitle) =>
+      `У вас уже накопилось <b>${count}</b> новых лидов.\n\n` +
+      `Но в группе <b>${groupTitle}</b> я пока не администратор. Дайте права, и я сразу отправлю все накопившиеся лиды.`,
+    botPromoted: (groupTitle) =>
+      `Спасибо, теперь я администратор в группе <b>${groupTitle}</b>.\n\n` +
+      `Новые лиды снова будут приходить автоматически.`,
+    botDemoted: (groupTitle) =>
+      `В группе <b>${groupTitle}</b> у меня больше нет прав администратора.\n\n` +
+      `Из-за этого я не смогу отправлять лиды, пока права не вернут.`,
+    alreadyBoundDm: (oldGroupId) =>
+      `У вас уже есть привязанная группа.\n\n` +
+      `Текущий ID группы: <code>${escape(oldGroupId)}</code>\n\n` +
+      `Сначала освободим старую через /changegroup.`,
+    alreadyBoundGroup:
+      `Этот аккаунт уже привязан к другой группе. Я выйду из этого чата.`,
+    changeGroupInstructions: (oldGroupId) =>
+      `Чтобы сменить группу, сначала удалите меня из старой.\n\n` +
+      `Текущий ID группы: <code>${escape(oldGroupId)}</code>\n\n` +
+      `После этого добавьте меня в новую группу и выдайте права администратора.`,
+    changeGroupNoCurrent:
+      `Сейчас у вас нет привязанной группы.\n\n` +
+      `Просто добавьте меня в нужную группу и сделайте администратором.`,
+    groupRemovedDm: (oldTitle) =>
+      `Меня удалили из группы <b>${oldTitle}</b>.\n\n` +
+      `Если хотите подключить новую группу, добавьте меня туда и выдайте права администратора.`,
+    newSheetNotReady:
+      `Сначала давайте закончим начальную настройку. Нажмите /start.`,
+    sheetsEmpty:
+      `У вас пока нет ни одного sheet.\n\n` +
+      `Если нужен новый, нажмите /newsheet.`,
+    sheetsTitle: (count) => `Ваши sheet'ы: <b>${count}</b>\n`,
+    verifyHint: (sheetId) => `/verify_${sheetId} — проверить подключение`,
+    sheetError: (errorReason) => `Ошибка: <code>${escape(errorReason)}</code>`,
+    sheetNotFound: `Этот sheet не найден или не принадлежит вам.`,
+    statusTitle: `Ваш текущий статус\n`,
+    statusName: (value) => `👤 <b>Имя:</b> ${value || '—'}`,
+    statusPhone: (value) => `📱 <b>Телефон:</b> ${value || '—'}`,
+    statusGmail: (value) => `📧 <b>Gmail:</b> ${value || '—'}`,
+    statusGroup: (value) => `💬 <b>ID группы:</b> ${value || '—'}`,
+    statusLanguage: `🌐 <b>Язык:</b> Русский`,
+    statusMentions: (count) => `📣 <b>Упоминания в story:</b> ${count}`,
+    statusSheets: (all, verified, pending, errored) =>
+      `📑 <b>Sheet'ы:</b> ${all} (✅ ${verified} · ⏳ ${pending} · ❌ ${errored})`,
+    statusActive: `Все работает как нужно.`,
+    statusProfilePending: (status) => `Профиль еще не завершен: <code>${escape(status)}</code>`,
+    statusNeedVerifiedSheet: `Пока нет ни одного подтвержденного sheet. Откройте /sheets.`,
+    statusNeedGroup: `Группа еще не подключена. Добавьте меня в группу.`,
+    help:
+      `Если понадобится помощь, напишите <a href="https://t.me/azadov_azamat">@azadov_azamat</a>.`,
+    errorGeneric: `⚠️ Что-то пошло не так. Попробуйте еще раз, пожалуйста. 🔄`,
+    notStarted: `Сначала нажмите /start.`,
+    sendOwnContact: `Пожалуйста, отправьте именно свой номер.`,
+    chooseLanguage: `Выберите язык. Следующие сообщения буду отправлять на нем.`,
+    languageChanged: `Готово, продолжаем на этом языке.`,
+    sheetCreateError: (errorMessage) =>
+      `Не получилось создать sheet:\n<code>${escape(errorMessage)}</code>\n\nПопробуйте снова через /newsheet.`,
+    sheetIssue: (sheetUrl, errorMessage) =>
+      `Возникла проблема со sheet: <a href="${sheetUrl}">открыть</a>\n<code>${escape(errorMessage)}</code>\n\nСтатус можно посмотреть через /sheets.`,
+    groupReconnectRequired:
+      `Связь с Telegram-группой потерялась. Удалите меня из группы, добавьте заново и выдайте права администратора. /changegroup`,
+    profileNotReadyForGroup:
+      `Сначала завершите профиль и подтвердите хотя бы один sheet. /start`,
+    needVerifiedSheetForGroup:
+      `Сначала подключите хотя бы один sheet к Facebook Lead Center и подтвердите его.\n\n/sheets — список`,
+    groupAlreadyClaimed:
+      `Эта группа уже привязана к другому пользователю. Пожалуйста, выберите другую группу.`,
+    groupTitleFallback: 'группа',
+    storyMentionReplies: [
+      (count) =>
+        `Спасибо за упоминание в story.\n\nЭто уже <b>${count}</b>-й раз, когда вы отмечаете нас.`,
+      (count) =>
+        `Очень приятно видеть нас в вашей story. Спасибо.\n\nВсего упоминаний от вас: <b>${count}</b>.`,
+      (count) =>
+        `Спасибо за поддержку и теплое упоминание.\n\nСчетчик ваших story mention уже на отметке <b>${count}</b>.`,
+      (count) =>
+        `Благодарим за story mention.\n\nВы уже отметили нас <b>${count}</b> раз.`,
+    ],
   },
-
-  reset: `🔄 Hamma sozlamalar tozalandi. Qayta boshlash uchun /start bosing.`,
-
-  unknownCommand: `Buyruqni tushunmadim. /help dan foydalaning.`,
-
-  help:
-    `<b>Lead Bridge — buyruqlar:</b>\n\n` +
-    `/start — sozlashni boshlash yoki davom ettirish\n` +
-    `/status — joriy holatni ko'rish\n` +
-    `/sheets — barcha sheetlaringiz ro'yxati\n` +
-    `/newsheet — yangi Google Sheet yaratish\n` +
-    `/changegroup — Telegram guruhini o'zgartirish\n` +
-    `/reset — hamma narsani qayta boshlash\n` +
-    `/help — yordam`,
-
-  errorGeneric: `❌ Xatolik yuz berdi. Birozdan keyin qaytadan urining.`,
 };
 
-function escape(s) {
-  return String(s || '')
+function forLanguage(language) {
+  const lang = normalizeLanguage(language);
+  const copy = COPY[lang];
+
+  return {
+    ...copy,
+    language: lang,
+    sheetsList: (sheets) => {
+      if (sheets.length === 0) return copy.sheetsEmpty;
+
+      const lines = [copy.sheetsTitle(sheets.length)];
+      sheets.forEach((sheet, index) => {
+        const label = SHEET_STATUS_LABELS[lang][sheet.status] || sheet.status;
+        const title = sheet.title ? ` — ${escape(sheet.title)}` : '';
+        lines.push(`${index + 1}. <a href="${sheet.spreadsheetUrl}">Sheet</a>${title}\n   ${label}`);
+        if (sheet.gmail) {
+          lines.push(`   📧 <code>${escape(sheet.gmail)}</code>`);
+        }
+        if (sheet.groupId) {
+          const groupTitle = sheet.group?.title || `ID ${sheet.groupId}`;
+          lines.push(`   💬 ${escape(groupTitle)}`);
+        }
+        if (sheet.status === 'pending_verification') {
+          lines.push(`   ${copy.verifyHint(sheet.id)}`);
+        }
+        if (sheet.status === 'error' && sheet.errorReason) {
+          lines.push(`   ${copy.sheetError(sheet.errorReason)}`);
+        }
+      });
+      return lines.join('\n');
+    },
+    status: ({ user, sheets, isActive }) => {
+      const lines = [copy.statusTitle];
+      lines.push(copy.statusName(escape(user.firstName || '')));
+      lines.push(copy.statusPhone(escape(user.phone || '')));
+      lines.push(copy.statusLanguage);
+      lines.push(copy.statusMentions(Number(user.mentionCount || 0)));
+
+      const verified = sheets.filter((sheet) => sheet.status === 'verified').length;
+      const pending = sheets.filter((sheet) => sheet.status === 'pending_verification').length;
+      const errored = sheets.filter((sheet) => sheet.status === 'error').length;
+      const withGroup = sheets.filter((sheet) => sheet.status === 'verified' && sheet.groupId).length;
+      lines.push(copy.statusSheets(sheets.length, verified, pending, errored));
+      lines.push('');
+
+      if (isActive) {
+        lines.push(copy.statusActive);
+      } else if (user.status !== 'ready') {
+        lines.push(copy.statusProfilePending(user.status));
+      } else if (verified === 0) {
+        lines.push(copy.statusNeedVerifiedSheet);
+      } else if (withGroup === 0) {
+        lines.push(copy.statusNeedGroup);
+      }
+
+      return lines.join('\n');
+    },
+    storyMentionReply: (count) => {
+      const variants = copy.storyMentionReplies;
+      return variants[Math.floor(Math.random() * variants.length)](count);
+    },
+  };
+}
+
+function escape(value) {
+  return String(value || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
+
+module.exports = {
+  forLanguage,
+  escape,
+};

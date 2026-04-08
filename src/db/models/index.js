@@ -2,21 +2,23 @@
  * Model registry — barcha modellar va ularning bog'lanishlari.
  *
  * Foydalanish:
- *   const { sequelize, User, Sheet, SentLead } = require('./db/models');
+ *   const { sequelize, User, Sheet, Group, SentLead } = require('./db/models');
  */
 
 const sequelize = require('../sequelize');
 const defineUser = require('./user.model');
 const defineSheet = require('./sheet.model');
+const defineGroup = require('./group.model');
 const defineSentLead = require('./sentLead.model');
 
 const User = defineUser(sequelize);
 const Sheet = defineSheet(sequelize);
+const Group = defineGroup(sequelize);
 const SentLead = defineSentLead(sequelize);
 
 // --- Associations ---
 
-// User 1—N Sheet (CASCADE: user o'chsa sheetlari ham)
+// User 1—N Sheet (CASCADE)
 User.hasMany(Sheet, {
   foreignKey: 'userTelegramId',
   sourceKey: 'telegramId',
@@ -29,7 +31,33 @@ Sheet.belongsTo(User, {
   as: 'user',
 });
 
-// Sheet 1—N SentLead (CASCADE: sheet o'chsa send tarixi ham)
+// User 1—N Group (CASCADE)
+User.hasMany(Group, {
+  foreignKey: 'ownerTelegramId',
+  sourceKey: 'telegramId',
+  as: 'groups',
+  onDelete: 'CASCADE',
+});
+Group.belongsTo(User, {
+  foreignKey: 'ownerTelegramId',
+  targetKey: 'telegramId',
+  as: 'owner',
+});
+
+// Group 1—N Sheet (SET NULL: group o'chsa, sheetlar group_id ni yo'qotadi)
+Group.hasMany(Sheet, {
+  foreignKey: 'groupId',
+  sourceKey: 'id',
+  as: 'sheets',
+  onDelete: 'SET NULL',
+});
+Sheet.belongsTo(Group, {
+  foreignKey: 'groupId',
+  targetKey: 'id',
+  as: 'group',
+});
+
+// Sheet 1—N SentLead (CASCADE)
 Sheet.hasMany(SentLead, {
   foreignKey: 'sheetId',
   sourceKey: 'id',
@@ -46,5 +74,6 @@ module.exports = {
   sequelize,
   User,
   Sheet,
+  Group,
   SentLead,
 };
