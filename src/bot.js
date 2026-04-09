@@ -97,7 +97,6 @@ async function setupCommandMenu() {
   });
   console.log(`[bot] command menu set (${COMMAND_MENU.uz.length} ta buyruq)`);
 }
-
 bot.setupCommandMenu = setupCommandMenu;
 
 module.exports = bot;
