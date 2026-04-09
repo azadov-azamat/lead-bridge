@@ -195,8 +195,12 @@ async function routeText(ctx, user, text) {
   if (labelKey === 'uz' || labelKey === 'ru') {
     await db.updateUser(user.telegramId, { language: labelKey });
     const updated = await db.getUser(user.telegramId);
-    const updatedCopy = getCopy(updated, ctx);
-    await ctx.replyWithHTML(updatedCopy.languageChanged);
+    // Auth middleware ctx.copy/ctx.user ni xabar boshida o'rnatgan, endi
+    // yangi til bilan yangilash kerak — aks holda renderPage eski tilda javob
+    // qaytaradi.
+    ctx.user = updated;
+    ctx.copy = messages.forLanguage(updated.language);
+    await ctx.replyWithHTML(ctx.copy.languageChanged);
     // Til tanlangach — orqaga (settings yoki main) qaytamiz
     const previousPage = await state.popPage(updated.telegramId);
     await renderPage(ctx, updated, previousPage);
