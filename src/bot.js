@@ -66,16 +66,12 @@ bot.__launched = false;
 const COMMAND_MENU = {
   uz: [
     { command: 'start', description: 'Botni ochish va boshlash' },
-    { command: 'status', description: 'Holatimni ko‘rish' },
-    { command: 'sheets', description: 'Sheetlarim ro‘yxati' },
     { command: 'newsheet', description: 'Yangi sheet yaratish' },
     { command: 'changegroup', description: 'Guruhni almashtirish' },
     { command: 'help', description: 'Yordam olish' },
   ],
   ru: [
     { command: 'start', description: 'Открыть бота и начать' },
-    { command: 'status', description: 'Посмотреть статус' },
-    { command: 'sheets', description: 'Список моих sheetов' },
     { command: 'newsheet', description: 'Создать новый sheet' },
     { command: 'changegroup', description: 'Сменить группу' },
     { command: 'help', description: 'Получить помощь' },
