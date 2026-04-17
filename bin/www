@@ -216,7 +216,10 @@ async function main() {
     }
 
     const me = await bot.telegram.getMe();
-    console.log(`[worker ${workerId}] @${me.username} ishga tushdi`);
+    const mode = isProd ? 'webhook' : 'polling';
+    console.log(
+      `[worker ${workerId}] BOT ISHGA TUSHDI → @${me.username} (${me.first_name}, id=${me.id}, mode=${mode})`
+    );
 
     // Telegram "/" menyusini yangilaymiz (idempotent)
     try {
