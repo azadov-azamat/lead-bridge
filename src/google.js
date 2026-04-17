@@ -140,25 +140,58 @@ async function createSheetForUser({ title, userEmail }) {
   return { sheetId, sheetUrl };
 }
 
+function quoteSheetTitle(title) {
+  return `'${String(title).replace(/'/g, "''")}'`;
+}
+
 /**
- * Sheet'ning birinchi qatoridagi headerlarni o'qiydi va Facebook Lead Center
- * ustunlari bor-yo'qligini tekshiradi.
+ * Spreadsheet'dagi har bir tabning birinchi qatorini o'qiydi va Facebook
+ * ustunlariga mos keladigan tabni qaytaradi. Facebook Lead Center har form
+ * uchun alohida tab yaratadi, shuning uchun default "Sheet1" emas.
  */
-async function verifyFacebookConnection(sheetId) {
+async function scanSheetTabs(sheetId) {
   const sheets = getSheetsClient();
-  try {
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range: '1:1',
-    });
-    const headers = (res.data.values && res.data.values[0]) || [];
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    fields: 'sheets(properties(title))',
+  });
+  const tabs = (meta.data.sheets || []).map((s) => s.properties.title);
+  if (tabs.length === 0) return { tabs: [], match: null, bestMissing: FB_SIGNATURE_COLUMNS, bestHeaders: [] };
+
+  const res = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId: sheetId,
+    ranges: tabs.map((t) => `${quoteSheetTitle(t)}!1:1`),
+  });
+  const valueRanges = res.data.valueRanges || [];
+
+  let bestHeaders = [];
+  let bestMissing = FB_SIGNATURE_COLUMNS;
+  for (let i = 0; i < tabs.length; i++) {
+    const headers = (valueRanges[i]?.values && valueRanges[i].values[0]) || [];
     const normalized = headers.map((h) => String(h || '').trim().toLowerCase());
     const missing = FB_SIGNATURE_COLUMNS.filter((col) => !normalized.includes(col));
-    return {
-      verified: missing.length === 0,
-      headers,
-      missing,
-    };
+    if (missing.length === 0) {
+      return { tabs, match: { tab: tabs[i], headers }, bestMissing: [], bestHeaders: headers };
+    }
+    if (missing.length < bestMissing.length) {
+      bestMissing = missing;
+      bestHeaders = headers;
+    }
+  }
+  return { tabs, match: null, bestMissing, bestHeaders };
+}
+
+/**
+ * Spreadsheet ichidagi har bir tabni tekshiradi — qaysidir tabda Facebook
+ * Lead Center ustunlari bor-yo'qligini aniqlaydi.
+ */
+async function verifyFacebookConnection(sheetId) {
+  try {
+    const { match, bestMissing, bestHeaders } = await scanSheetTabs(sheetId);
+    if (match) {
+      return { verified: true, headers: match.headers, missing: [], tab: match.tab };
+    }
+    return { verified: false, headers: bestHeaders, missing: bestMissing };
   } catch (err) {
     return {
       verified: false,
@@ -170,14 +203,17 @@ async function verifyFacebookConnection(sheetId) {
 }
 
 /**
- * Sheet'dagi barcha rowlarni o'qiydi.
+ * Facebook ustunlari bor tabdagi barcha rowlarni o'qiydi.
  * Return: { headers, rows } — har row { [colName]: value } shaklida
  */
 async function readSheetRows(sheetId) {
   const sheets = getSheetsClient();
+  const { match } = await scanSheetTabs(sheetId);
+  if (!match) return { headers: [], rows: [] };
+
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: 'A:ZZ',
+    range: `${quoteSheetTitle(match.tab)}!A:ZZ`,
   });
   const values = res.data.values || [];
   if (values.length < 2) return { headers: [], rows: [] };
